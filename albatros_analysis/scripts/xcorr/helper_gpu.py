@@ -123,7 +123,6 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
             pol0=bdc.make_continuous_gpu(chunk['pol0'],chunk['specnums'],start_specnum,channels[aa.obj.channel_idxs],acclen,nchans=2049)
             pol1=bdc.make_continuous_gpu(chunk['pol1'],chunk['specnums'],start_specnum,channels[aa.obj.channel_idxs],acclen,nchans=2049)
            
-            print("plo0", pol0.shape)
             perc_missing = (1 - len(chunk["specnums"]) / acclen) * 100
             missing_fraction[j, i] = perc_missing
             # CHUNK 0 is going to have all zeros at the top. Ignore first chunk in the saved output.
@@ -132,20 +131,21 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
             to_ipfb_pol1[:2*cut] = cut_chunks[j,1,:,:] # <---- zeros for CHUNK 0
             to_ipfb_pol1[2*cut:] = pol1
 
+            if count%100 == 0 : 
+                print("to ipfb mean", np.mean(to_ipfb_pol0))
+
             raw_pol0 = pu.cupy_ipfb(to_ipfb_pol0, filt)
             raw_pol1 = pu.cupy_ipfb(to_ipfb_pol1, filt)
-            print("pfb buf", raw_pol0[cut:-cut].shape)
+
             pol0_new = pu.cupy_pfb(raw_pol0[cut:-cut],cupy_win_big,nchan=2048*osamp+1,ntap=4)
             pol1_new = pu.cupy_pfb(raw_pol1[cut:-cut],cupy_win_big,nchan=2048*osamp+1,ntap=4)
-            print("out pfb", pol0_new.shape)
-            print("in xin", pol0_new[:, repfb_chanstart : repfb_chanend].shape)
+            
+   
             cut_chunks[j,0,:,:] = pol0[-2*cut:,:]
             cut_chunks[j,1,:,:] = pol1[-2*cut:,:]
             xin[j*nant,:,:] = pol0_new[:, repfb_chanstart : repfb_chanend] # BFI data is C-major for IPFB
             xin[j*nant+1,:,:] = pol1_new[:, repfb_chanstart : repfb_chanend] #gotta support arbitrary chans
-            raise ValueError
-        # print(xin.shape, xin.flags)
-        # print(scratch.shape)
+        
         out=cr.avg_xcorr_all_ant_gpu(xin,nant,npol,re_pfb_size,nchan,split=1,out=scratch)
         end_event.record()
         end_event.synchronize()
@@ -154,8 +154,10 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
 
         tot += time.perf_counter()-t0
         count += 1
-        if count %10==0:
+        if count %100==0:
             print("niter", count, "time", tot/count, "s BW", 2*nant*pol0.nbytes/tot*count/1e6, "MSPS")
+            print(np.mean(xin))
+            # print("to_ipfb", to_ipfb_pol0.dtype, "raw_pol", raw_pol0.dtype, "pol_new", pol0_new.dtype, "xin", xin.dtype)
 
     print("niter", count, "time", tot/count, "s BW", 2*nant*pol0.nbytes/tot*count/1e6, "MSPS")
     vis = np.ma.masked_invalid(vis)

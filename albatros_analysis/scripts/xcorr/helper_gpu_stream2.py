@@ -59,7 +59,9 @@ Returns:
 - freqs: Array of final frequency bins processed.
 """
 
-def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,cut=10,filt_thresh=0.45):
+def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,cut=10,filt_thresh=0.45, overlap_factor=0.5):
+
+    shift_size = int(nblock * (1 - overlap_factor))
 
     nant = len(idxs)
     npol = 2
@@ -68,7 +70,7 @@ def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,c
     # nblock = (pfb_size-2*cut)*4096 // lblock - (ntap - 1)
 
     lblock = 4096*osamp
-    szblock = int(nblock*lblock) # <-- this is to adjust for the pfb offset
+    szblock = int((nblock + (ntap-1) )*lblock) # <-- this is to adjust for the pfb offset
     # should change such that the other way around
 
     lchunk = 4096*acclen # <-- length of chunk after IPFB (not sure)
@@ -90,7 +92,7 @@ def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,c
     pol = cp.empty((acclen+2*cut, 2049), dtype='complex64', order='C') #<-- not sure about shape
     cut_pol = cp.zeros((nant, npol, 2*cut, 2049), dtype='complex64', order='C')
 
-    pfb_buf = cp.zeros((nblock, lblock), dtype='complex64', order='C')  # <- this assume that ipfb output is raveled
+    pfb_buf = cp.zeros((nant, npol, nblock+(ntap-1), lblock), dtype='complex64', order='C')  # <- this assume that ipfb output is raveled
     rem_buf = cp.empty((nant, npol, lchunk), dtype='complex64', order='C')
     
     
@@ -121,13 +123,13 @@ def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,c
     end_event = cp.cuda.Event()
 
     jobs = list(zip(*antenna_objs))
-    print("chunky inputs:",nchunks, lchunk, nblock, lblock)
-    job_chunks = get_chunky(nchunks, lchunk, nblock, lblock)
+    print("chunky inputs:",nchunks, lchunk, nblock+(ntap-1), lblock)
+    job_chunks = get_chunky(nchunks, lchunk, nblock+(ntap-1), lblock)
     
     # job_chunks = get_chunkier(nchunks, lchunk, nblock+(ntap-1)*lblock)
     print("job_chunks", len(job_chunks), job_chunks[:10])
 
-    xin = cp.empty((nant*npol, nblock-(ntap-1), nchan),dtype='complex64',order='F') # <- needs to be FORTRAN for cuda xcorr func
+    xin = cp.empty((nant*npol, nblock, nchan),dtype='complex64',order='F') # <- needs to be FORTRAN for cuda xcorr func
     vis = np.zeros((nant*npol, nant*npol, nchan, len(job_chunks)), dtype="complex64", order="F") # should not be nchunks (should be n super chunks)      
     missing_fraction = np.zeros((nant, len(job_chunks)), dtype='float64', order='F') # <-- dont know when to put Fortran order
 
@@ -141,49 +143,95 @@ def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,c
     # raise ValueError
 
     time_count = 0
-    pfb_idx[:,:] = 0
 
-    jobs = zip(*antenna_objs)
-    job_num = len(jobs)
-    chunk_idx = 0
-
-    while chunk_idx < job_num:
-        for j in range(nant):
-            for k in range(npol):
-                while pfb_idx[j,k] <= szblock:
-                    if pfb_idx[j,k]+rem_idx[j,k] > 0:
-
-                    else:
-                        pfb_buf[]
-
-
-    for i, chunks in enumerate(zip(*antenna_objs)):
-        t0 = time.perf_counter()
-        if i%10==0: print(i)
-        start_event.record()
-        for j in range(nant):
-            chunk=chunks[j]
-            start_specnum = start_specnums[j]
-
-            for k in range(npol):
-                pol[:2*cut] = cut_pol[j,k,:,:]
-                pol[2*cut:] = bdc.make_continuous_gpu(chunk[f"pol{k}"],chunk['specnums'],start_specnum,channels[aa.obj.channel_idxs],acclen,nchans=2049)
-
-                pfb_scratch = pu.cupy_ipfb(pol, filt)[cut:-cut].ravel() # <-- Memory??
-
-                if pfb_idx[j,k] + lchunk 
-
-    
+    print(f"starting {len(job_chunks)} Jobs over {nchunks} chunks...")
+    for s, (job_idx1, job_idx2) in enumerate(job_chunks):
                 
+        start_event.record()
+        start_t = time.perf_counter()
+        subjobs = jobs[job_idx1:job_idx2]
 
+        pfb_buf[:,:,:-shift_size,:] = pfb_buf[:,:,shift_size:,:]
+        pfb_idx[:,:] = 0 
 
+        for j in range(nant):
+            start_specnum = start_specnums[j]
+            missing_counter = 0
+
+            for k in range(npol):
+                if pfb_idx[j,k]+rem_idx[j,k] > szblock:
+                    assert job_idx1 == job_idx2
+                    extra_idx = szblock-pfb_idx[j,k]
+                    # print("szblock", szblock, "pfb_idx", pfb_idx[j,k], "extra", extra_idx)
+
+                    # add remaining to complete the pfb buffer
+                    pfb_buf[j,k,-1,:] = rem_buf[j,k,:extra_idx]
+
+                    # shift remaining buffer
+                    rem_buf[j,k, :rem_idx[j,k]-extra_idx] = rem_buf[j,k, extra_idx:rem_idx[j,k]]
+                    rem_idx[j,k] -= extra_idx
+
+                    pfb_idx[j,k] = szblock
+                else:
+                    assert  job_idx1 != job_idx2
+                    pfb_buf[j,k,-1,:rem_idx[j,k]] = rem_buf[j,k, :rem_idx[j,k]]
+                    pfb_idx[j,k] += rem_idx[j,k]
+                    rem_idx[j,k] = 0
+
+                    for i, chunks in enumerate(subjobs):
                         
+                        chunk=chunks[j]
+                        missing_fraction[j, s] += (1 - len(chunk["specnums"]) / acclen) * 100 
+                        missing_counter += 1
 
-    
-    end_t = time.perf_counter()
-    time_count += end_t - start_t
-    if (s-1) % 10000 == 0:
-        print(f"Job Chunk {s+1}/{len(job_chunks)}, avg time {time_count/(s+1):.4f} s")
+                        pol[:2*cut] = cut_pol[j,k,:,:]
+                        pol[2*cut:] = bdc.make_continuous_gpu(chunk[f"pol{k}"],chunk['specnums'],start_specnum,channels[aa.obj.channel_idxs],acclen,nchans=2049)
+                        cut_pol[j,k, :, :] = pol[-2*cut:]
+
+                        pfb_scratch = pu.cupy_ipfb(pol, filt)[cut:-cut].ravel() # how to handle memory here??
+                        # print(pfb_scratch.shape)
+
+                        final_idx = pfb_idx[j,k]+lchunk
+
+                        if final_idx > szblock:
+                            assert i >= len(subjobs)-1, "Job plan has an error"
+                            extra_idx = szblock-pfb_idx[j,k]
+                            rem_idx[j,k] = final_idx - szblock
+
+                            pfb_buf[j,k].flat[pfb_idx[j,k]:] = pfb_scratch[:extra_idx]
+                            rem_buf[j,k,:rem_idx[j,k]] = pfb_scratch[extra_idx:]
+
+                            pfb_idx[j,k] = szblock
+                        else:
+                            pfb_buf[j,k].flat[pfb_idx[j,k]:final_idx] = pfb_scratch[:]
+
+                            rem_idx[j,k] = 0
+                            pfb_idx[j,k] = final_idx    
+
+                assert pfb_idx[j,k] <= szblock, f"pfb_buf too big??: {pfb_idx[j,k]} instead of {szblock}"
+                if pfb_idx[j,k] != szblock: 
+                    print(f"{s+1}/{len(job_chunks)} (Ant {j}, pol {k}): Incomplete pfb_buffer with only {pfb_idx[j,k]} instead of {szblock}")
+                    pfb_buf[j,k].flat[pfb_idx[j,k]:] = 0.
+
+                xin[j*npol+k,:,:] = pu.cupy_pfb(pfb_buf[j,k],cupy_win_big,nchan=2048*osamp+1,ntap=4)[:, repfb_chanstart : repfb_chanend]
+
+
+            if missing_counter != 0:
+                missing_fraction[j,s] /= missing_counter
+            else:
+                missing_fraction[j,s] = missing_fraction[j,s-1]
+                # here maybe a rolling count of the chunks (i) in use to know what is the exact missing percentage
+            
+        out=cr.avg_xcorr_all_ant_gpu(xin,nant,npol,nblock,nchan,split=1)
+        end_event.record()
+        end_event.synchronize()
+
+        vis[:,:,:,s] = cp.asnumpy(out)
+
+        end_t = time.perf_counter()
+        time_count += end_t - start_t
+        if (s-1) % 10000 == 0:
+            print(f"Job Chunk {s+1}/{len(job_chunks)}, avg time {time_count/(s+1):.4f} s")
     
     print(30*"=")
     print(f"Completed {len(job_chunks)}/{len(job_chunks)} Job Chunks\navg time per job: {time_count/len(job_chunks):.4f} s")
@@ -191,3 +239,40 @@ def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,c
     
     vis = np.ma.masked_invalid(vis)
     return vis, missing_fraction, np.arange(repfb_chanstart, repfb_chanend) 
+
+
+def get_chunky(nchunks, lchunk, nblock, lblock):
+    ranges = []
+    big_sz = nblock * lblock
+    need = big_sz
+    remainder = 0
+    cur_chunk = 0
+
+    while True:
+        start_chunk = cur_chunk
+        used = 0
+
+        while remainder < need and cur_chunk < nchunks:
+            remainder += lchunk
+            cur_chunk += 1
+            used += 1
+
+        if remainder >= need:
+            ranges.append((start_chunk, cur_chunk))
+            remainder -= need
+        else:
+            # Not enough chunks left to satisfy need
+            ranges.append((start_chunk, None))
+            break
+
+        # After the first full fill, just fill 1 block at a time
+        need = lblock
+
+        # Also handle the case where we can satisfy `need` from remainder only
+        if remainder >= need and used == 0:
+            # We just use remainder — no chunk consumed
+            ranges.append((cur_chunk, cur_chunk))
+            remainder -= need
+            need = lblock
+
+    return ranges

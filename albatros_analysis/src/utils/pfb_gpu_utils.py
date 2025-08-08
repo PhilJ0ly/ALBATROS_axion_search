@@ -4,7 +4,7 @@
 
 import numpy as np
 import cupy as cp
-from . import pycufft
+from albatros_analysis.src.utils import pycufft
 # from cupy.fft import rfft, pycufft.irfft
 import time
 from albatros_analysis.src.utils.pfb_utils import *
@@ -31,7 +31,7 @@ def calculate_filter(matft, thresh):
 
     if thresh>0:
         abs_mat_sq = cp.abs(matft)**2
-        filt *= abs_mat_sq/(thresh**2+abs_mat_sq)*(1+thresh**2)
+        filt *= abs_mat_sq/(thresh**2+abs_mat_sq)*(1.+thresh**2)
     
     return filt
     
@@ -49,8 +49,7 @@ def compute_filter(matft, thresh):
     filt = 1/np.conj(matft)
     if thresh>0:
         matft_abs_sq = np.abs(matft) ** 2
-        thresh_sq = thresh * thresh
-        filt *= matft_abs_sq / (thresh_sq + matft_abs_sq) * (1.0 + thresh_sq)
+        filt *= matft_abs_sq / (thresh_sq + matft_abs_sq) * (1.0 + thresh**2)
         
     return filt  
 
@@ -91,16 +90,33 @@ def cupy_ipfb(dat,filt):
     res=res.T
     return res
 
-def cupy_pfb(timestream, win, out=None, nchan=2049, ntap=4):
+def cupy_pfb_old(timestream, win, out=None, nchan=2049, ntap=4):
     lblock = 2*(nchan-1)
     nblock = timestream.size // lblock - (ntap - 1)
     timestream=timestream.reshape(-1,lblock)
     if out is not None:
         assert out.shape == (nblock, nchan)
     win=win.reshape(ntap,lblock)
-    y=timestream*win[:,cp.newaxis]
+    y=timestream*win[:,cp.newaxis] # <-- takes a lot of memory
     y=y[0,:nblock,:]+y[1,1:nblock+1,:]+y[2,2:nblock+2,:]+y[3,3:nblock+3,:]
-    # return y
+    out = pycufft.rfft(y,axis=1)
+    return out
+
+def cupy_pfb(timestream, win, out=None, nchan=2049, ntap=4):
+    # A more memory efficient version
+    lblock = 2*(nchan-1)
+    nblock = timestream.size // lblock - (ntap - 1)
+    timestream=timestream.reshape(-1,lblock)
+    if out is not None:
+        assert out.shape == (nblock, nchan)
+    win=win.reshape(ntap,lblock)
+    
+    y = timestream[0:nblock] * win[0]
+    
+    # Accumulate remaining taps in-place
+    for i in range(1, ntap):
+        y += timestream[i:nblock+i] * win[i]
+        
     out = pycufft.rfft(y,axis=1)
     return out
 

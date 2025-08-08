@@ -77,6 +77,9 @@ if __name__=="__main__":
 
     acclen=pfb_size - 2*cut
 
+    acclen = 2048
+    cut = 100
+
     nchunks = int(np.floor((end_t-init_t)*250e6/4096/acclen))
     idxs, files = helper.get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents)
     print("final idxs", idxs)
@@ -89,12 +92,14 @@ if __name__=="__main__":
 
     t1=time.time()
     if pUnit == "gpu":
-        from helper_gpu_stream import repfb_xcorr_avg
-        # idxs,files,acclen, pfb_size,nchunks, nblock, chanstart,chanend,osamp,cut=10,filt_thresh=0.45
+        # from helper_gpu_stream import repfb_xcorr_avg
+        from helper_gpu_stream_clean import repfb_xcorr_avg
         
         # pols,missing_fraction,channels=repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize,filt_thresh=0.45)
 
-        pols,missing_fraction,channels=repfb_xcorr_avg(idxs,files,14336,nchunks,4, chanstart,chanend,osamp,cut=1024,filt_thresh=0.45)
+        pols,missing_fraction,channels=repfb_xcorr_avg(idxs,files,acclen,nchunks,3, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
+
+        # raise ValueError
     else:
         import helper_cpu
         os.environ['NUMBA_OPT']='3'
@@ -108,7 +113,8 @@ if __name__=="__main__":
     
     print("Processing took", t2-t1, "s")
 
-    fname = f"xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(nchunks)}_{chanstart}_{chanend}_test.npz"
+    fname = f"stream_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(nchunks)}_{chanstart}_{chanend}.npz"
+    fGPUname = f"stream_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(njobs)}_{chanstart}_{chanend}.npz"
     fpath = path.join(outdir,fname)
     np.savez(fpath,data=pols.data,mask=pols.mask,missing_fraction=missing_fraction,chans=channels)
 

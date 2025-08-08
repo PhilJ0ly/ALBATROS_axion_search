@@ -1,5 +1,5 @@
 Environment: albatros_analysis
-Created on: Fri 08 Aug 2025 12:37:28 PM EDT
+Created on: Fri 08 Aug 2025 02:11:39 PM EDT
 
 === Pip Packages ===
 Package           Version
@@ -14,12 +14,14 @@ fastrlock         0.8.1+computecanada
 fonttools         4.59.0+computecanada
 jplephem          2.23
 kiwisolver        1.4.8+computecanada
+llvmlite          0.44.0+computecanada
 matplotlib        3.10.1+computecanada
+numba             0.61.2+computecanada
 numpy             2.2.2+computecanada
 packaging         25.0+computecanada
 pandas            2.2.3+computecanada
 pillow            11.1.0+computecanada
-pip               23.2.1
+pip               25.2
 psutil            6.1.1+computecanada
 pyerfa            2.0.1.5+computecanada
 pyparsing         3.2.3+computecanada
@@ -36,12 +38,17 @@ tzdata            2025.2+computecanada
 === Loaded Modules ===
 
 Currently Loaded Modules:
-  1) CCconfig            7) [2mgcccore/.12.3[0m    (H)  13) flexiblas/3.3.1         19) nccl/2.26.2    ([1;34mt[0m)
-  2) gentoo/2023   ([1;31mS[0m)   8) gcc/12.3         ([1;34mt[0m)  14) aocl-blas/5.1           20) ucc-cuda/1.2.0
-  3) StdEnv/2023   ([1;31mS[0m)   9) hwloc/2.9.1           15) aocl-lapack/5.1         21) cuda/12.6      ([1;34mt[0m)
-  4) python/3.11.5 ([1;34mt[0m)  10) libfabric/1.18.0      16) [2mcudacore/.12.6.2[0m (H,[1;34mt[0m)
-  5) ucx/1.14.1         11) pmix/4.2.4            17) gdrcopy/2.3.1
-  6) ucc/1.2.0          12) openmpi/4.1.5    ([1;31mm[0m)  18) ucx-cuda/1.14.1
+  1) CCconfig              12) ucc/1.2.0
+  2) gentoo/2023      ([1;31mS[0m)  13) openmpi/4.1.5    ([1;31mm[0m)
+  3) StdEnv/2023      ([1;31mS[0m)  14) flexiblas/3.3.1
+  4) mii/1.1.2             15) aocl-blas/5.1
+  5) python/3.11.5    ([1;34mt[0m)  16) aocl-lapack/5.1
+  6) [2mgcccore/.12.3[0m    (H)  17) [2mcudacore/.12.6.2[0m (H,[1;34mt[0m)
+  7) gcc/12.3         ([1;34mt[0m)  18) gdrcopy/2.3.1
+  8) hwloc/2.9.1           19) ucx-cuda/1.14.1
+  9) ucx/1.14.1            20) nccl/2.26.2      ([1;34mt[0m)
+ 10) libfabric/1.18.0      21) ucc-cuda/1.2.0
+ 11) pmix/4.2.4            22) cuda/12.6        ([1;34mt[0m)
 
   Where:
    [1;31mS[0m:  Module is Sticky, requires --force to unload or purge

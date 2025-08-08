@@ -2,11 +2,11 @@
 
 # Philippe Joly 2025-08-08
 
-# This script is to setup a standard environment on the Trillium GPU machine compatible with the albatros_analysis repository
+# This script is to setup a standard environment on the Trillium CPU machine compatible with the albatros_analysis repository
 
 show_help() {
     cat << EOF
-Usage: source trillium_gpu_build.sh [OPTIONS] <environment name>
+Usage: source trillium_cpu_build.sh [OPTIONS] <environment name>
 
 Options:
     -h, --help  Shows help
