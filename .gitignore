@@ -3,6 +3,8 @@
 .bashrc
 .Xauthority
 .trisetup
+.gitconfig
+.lesshst
 .cache/
 .conda/
 .condarc
