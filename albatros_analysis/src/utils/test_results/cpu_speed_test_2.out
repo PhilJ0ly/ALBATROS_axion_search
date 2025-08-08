@@ -1,0 +1,19 @@
+--- This Test was performed without using fastmath for njit functions --- niter=1e3
+
+BDC is using numpy
+{'osamp': 64, 'pfb_mult': 256, 'name': 'Osamp (64) pfb_mult (256)', 'nslice': 16384}
+
+Generating CPU matft...
+
+Running CPU IPFB...
+0.05686873936653137 s per iteration. 17.58435321653225 Hz
+    irfft 1 0.00963757085800171 # s/iter
+    dd.T 2.591609954833984e-06
+    rfft 0.021576306104660034
+    new thresh 0.010400385618209839 
+    irfft 2 0.012096515655517578
+
+Running CPU PFB...
+0.212345561504364 s per iteration. 4.709304931619437 Hz
+    polyphase 0.14632733416557311 
+    rfft 0.06408071255683899

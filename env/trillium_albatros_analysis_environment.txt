@@ -1,0 +1,58 @@
+Environment: albatros_analysis
+Created on: Fri 08 Aug 2025 12:37:28 PM EDT
+
+=== Pip Packages ===
+Package           Version
+----------------- -------------------------
+astropy           7.0.1+computecanada
+astropy-iers-data 0.2025.8.4.0.42.59
+certifi           2025.8.3
+contourpy         1.3.1+computecanada
+cupy              13.3.0+computecanada
+cycler            0.12.1+computecanada
+fastrlock         0.8.1+computecanada
+fonttools         4.59.0+computecanada
+jplephem          2.23
+kiwisolver        1.4.8+computecanada
+matplotlib        3.10.1+computecanada
+numpy             2.2.2+computecanada
+packaging         25.0+computecanada
+pandas            2.2.3+computecanada
+pillow            11.1.0+computecanada
+pip               23.2.1
+psutil            6.1.1+computecanada
+pyerfa            2.0.1.5+computecanada
+pyparsing         3.2.3+computecanada
+python_dateutil   2.9.0.post0+computecanada
+pytz              2025.2+computecanada
+PyYAML            6.0.2+computecanada
+scipy             1.15.2+computecanada
+setuptools        65.5.0
+sgp4              2.25
+six               1.17.0+computecanada
+skyfield          1.53
+tzdata            2025.2+computecanada
+
+=== Loaded Modules ===
+
+Currently Loaded Modules:
+  1) CCconfig            7) [2mgcccore/.12.3[0m    (H)  13) flexiblas/3.3.1         19) nccl/2.26.2    ([1;34mt[0m)
+  2) gentoo/2023   ([1;31mS[0m)   8) gcc/12.3         ([1;34mt[0m)  14) aocl-blas/5.1           20) ucc-cuda/1.2.0
+  3) StdEnv/2023   ([1;31mS[0m)   9) hwloc/2.9.1           15) aocl-lapack/5.1         21) cuda/12.6      ([1;34mt[0m)
+  4) python/3.11.5 ([1;34mt[0m)  10) libfabric/1.18.0      16) [2mcudacore/.12.6.2[0m (H,[1;34mt[0m)
+  5) ucx/1.14.1         11) pmix/4.2.4            17) gdrcopy/2.3.1
+  6) ucc/1.2.0          12) openmpi/4.1.5    ([1;31mm[0m)  18) ucx-cuda/1.14.1
+
+  Where:
+   [1;31mS[0m:  Module is Sticky, requires --force to unload or purge
+   [1;31mm[0m:  MPI implementations / Implémentations MPI
+   [1;34mt[0m:  Tools for development / Outils de développement
+   H:             Hidden Module
+
+ 
+
+
+=== System Information ===
+CUDA Version: V12.6.77
+GCC Version: gcc (Gentoo 12.3.1_p20230526 p2) 12.3.1 20230526
+Python Version: Python 3.11.5

@@ -1,0 +1,9 @@
+numpy==2.2.6 
+astropy==7.1.0 
+pandas==2.2.3
+notebook==7.4.3 
+skyfield==1.53 
+matplotlib==3.10.3 
+scipy==1.15.3
+numba==0.61.2
+psutil==7.0.0

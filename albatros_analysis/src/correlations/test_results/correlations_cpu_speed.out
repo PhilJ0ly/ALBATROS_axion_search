@@ -1,0 +1,8 @@
+Starting xcorr Speed test with (2, 4, 65536) array for 1000 iterations...
+
+Benchmarking with shape: M=2, K=4, nfreq=65536
+original: 0.3233 s,  12.9720 MSPS
+v1_simple: 0.0004155965694226325 s,  10092.248850434298 MSPS
+v2_optimized: 0.00038928543915972113 s,  10774.366513819454 MSPS
+v3_hybrid: 0.0004371117600239813 s,  9595.49566859031 MSPS
+v4_matmul: 0.00042062911204993725 s,  9971.501923770913 MSPS

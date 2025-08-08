@@ -1,0 +1,245 @@
+BDC is using cupy
+🧪 COMPREHENSIVE PFB/IPFB AND MATFT TESTING
+============================================================
+
+============================================================
+🔧 TESTING MATFT GENERATION FUNCTIONS
+============================================================
+
+--- Test 1: Osamp (64) pfb_mult (256) ---
+Generating CPU matft...
+mat size is (4096, 16384) 0.25 GB
+
+Generating GPU matft...
+mat size is (4096, 16384) 0.25 GB
+268468224 size in python
+
+=== matft Osamp (64) pfb_mult (256) ===
+CPU output shape: (4096, 8193)
+GPU output shape: (4096, 8193)
+CPU output dtype: complex64
+GPU output dtype: complex64
+✅ PASS: Outputs match within tolerance
+Max absolute difference: 4.43e-07
+Mean absolute difference: 8.67e-08
+Max relative difference: 2.57e-04
+Mean relative difference: 1.09e-07
+
+--- Test 2: Osamp (512) pfb_mult (128) ---
+Generating CPU matft...
+mat size is (4096, 65536) 1.0 GB
+
+Generating GPU matft...
+mat size is (4096, 65536) 1.0 GB
+1073774592 size in python
+
+=== matft Osamp (512) pfb_mult (128) ===
+CPU output shape: (4096, 32769)
+GPU output shape: (4096, 32769)
+CPU output dtype: complex64
+GPU output dtype: complex64
+✅ PASS: Outputs match within tolerance
+Max absolute difference: 6.05e-07
+Mean absolute difference: 1.20e-07
+Max relative difference: 6.51e-04
+Mean relative difference: 1.54e-07
+
+--- Test 3: Osamp (4096) pfb_mult (32) ---
+Generating CPU matft...
+mat size is (4096, 131072) 2.0 GB
+
+Generating GPU matft...
+mat size is (4096, 131072) 2.0 GB
+2147516416 size in python
+
+=== matft Osamp (4096) pfb_mult (32) ===
+CPU output shape: (4096, 65537)
+GPU output shape: (4096, 65537)
+CPU output dtype: complex64
+GPU output dtype: complex64
+✅ PASS: Outputs match within tolerance
+Max absolute difference: 6.05e-07
+Mean absolute difference: 1.15e-07
+Max relative difference: 1.06e-03
+Mean relative difference: 1.48e-07
+
+============================================================
+🧮 TESTING IPFB 
+============================================================
+
+--- IPFB Osamp (64) pfb_mult (256) (thresh=0.45) ---
+Input data shape: (16384, 2049)
+Matft shape: (4096, 8193)
+Running CPU IPFB...
+Running GPU IPFB...
+268566528 size in python
+268468224 size in python
+
+=== IPFB Osamp (64) pfb_mult (256) (thresh=0.45) ===
+CPU output shape: (16384, 4096)
+GPU output shape: (16384, 4096)
+CPU output dtype: float32
+GPU output dtype: float32
+✅ PASS: Outputs match within tolerance
+Max absolute difference: 1.49e-07
+Mean absolute difference: 1.29e-08
+Max relative difference: 2.73e-01
+Mean relative difference: 4.77e-06
+
+--- IPFB Osamp (512) pfb_mult (128) (thresh=0.45) ---
+Input data shape: (65536, 2049)
+Matft shape: (4096, 32769)
+Running CPU IPFB...
+Running GPU IPFB...
+1074266112 size in python
+1073774592 size in python
+
+=== IPFB Osamp (512) pfb_mult (128) (thresh=0.45) ===
+CPU output shape: (65536, 4096)
+GPU output shape: (65536, 4096)
+CPU output dtype: float32
+GPU output dtype: float32
+✅ PASS: Outputs match within tolerance
+Max absolute difference: 1.19e-07
+Mean absolute difference: 1.02e-08
+Max relative difference: 3.21e-01
+Mean relative difference: 3.94e-06
+
+--- IPFB Osamp (4096) pfb_mult (32) (thresh=0.45) ---
+Input data shape: (131072, 2049)
+Matft shape: (4096, 65537)
+Running CPU IPFB...
+Running GPU IPFB...
+2148532224 size in python
+2147516416 size in python
+
+=== IPFB Osamp (4096) pfb_mult (32) (thresh=0.45) ===
+CPU output shape: (131072, 4096)
+GPU output shape: (131072, 4096)
+CPU output dtype: float32
+GPU output dtype: float32
+✅ PASS: Outputs match within tolerance
+Max absolute difference: 1.19e-07
+Mean absolute difference: 1.04e-08
+Max relative difference: 3.40e-01
+Mean relative difference: 4.00e-06
+
+============================================================
+🧮 TESTING PFB 
+============================================================
+
+--- PFB Osamp (64) pfb_mult (256) (thresh=0.45) ---
+Input data shape: (14336, 4096)
+Running CPU PFB...
+win input shape (4, 262144)
+acc lin: 1.2174 s
+Running GPU PFB...
+231737064 size in python
+
+=== PFB Osamp (64) pfb_mult (256) (thresh=0.45) ===
+CPU output shape: (221, 131073)
+GPU output shape: (221, 131073)
+CPU output dtype: complex64
+GPU output dtype: complex64
+✅ PASS: Outputs match within tolerance
+Max absolute difference: 1.79e-05
+Mean absolute difference: 3.19e-06
+Max relative difference: 1.93e-03
+Mean relative difference: 5.04e-07
+
+--- PFB Osamp (512) pfb_mult (128) (thresh=0.45) ---
+Input data shape: (57344, 4096)
+Running CPU PFB...
+win input shape (4, 2097152)
+acc lin: 0.7302 s
+Running GPU PFB...
+914359144 size in python
+
+=== PFB Osamp (512) pfb_mult (128) (thresh=0.45) ===
+CPU output shape: (109, 1048577)
+GPU output shape: (109, 1048577)
+CPU output dtype: complex64
+GPU output dtype: complex64
+❌ FAIL: Outputs don't match within tolerance
+Max absolute difference: 7.97e-05
+Mean absolute difference: 1.29e-05
+Max relative difference: 5.51e-03
+Mean relative difference: 7.08e-07
+
+--- PFB Osamp (4096) pfb_mult (32) (thresh=0.45) ---
+Input data shape: (114688, 4096)
+Running CPU PFB...
+win input shape (4, 16777216)
+acc lin: 1.9473 s
+Running GPU PFB...
+1677721800 size in python
+
+=== PFB Osamp (4096) pfb_mult (32) (thresh=0.45) ===
+CPU output shape: (25, 8388609)
+GPU output shape: (25, 8388609)
+CPU output dtype: complex64
+GPU output dtype: complex64
+❌ FAIL: Outputs don't match within tolerance
+Max absolute difference: 2.03e-04
+Mean absolute difference: 3.32e-05
+Max relative difference: 2.96e-03
+Mean relative difference: 6.53e-07
+
+============================================================
+📊 FINAL RESULTS
+============================================================
+✅ MATFT generation functions: PASSED
+✅ IPFB functions: PASSED
+❌ PFB functions: FAILED
+
+❌ SOME TESTS FAILED! Check the output above for details.
+
+📈 Check generated plots for visual verification.
+axis 1, get plan r2c
+the plan in C has value 1
+plan worksize in C has value 268468224
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 2
+plan worksize in C has value 1073774592
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 3
+plan worksize in C has value -2147450880
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 4
+plan worksize in C has value 268566528
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 5
+plan worksize in C has value 268468224
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 6
+plan worksize in C has value 1074266112
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 7
+plan worksize in C has value 1073774592
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 8
+plan worksize in C has value -2146435072
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 9
+plan worksize in C has value -2147450880
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 10
+plan worksize in C has value 231737064
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 11
+plan worksize in C has value 914359144
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 12
+plan worksize in C has value 1677721800
+plan worksize in C has size 8

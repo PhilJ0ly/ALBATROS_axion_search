@@ -1,0 +1,20 @@
+{
+        "antennas": {
+            "ALB1": {
+                "name": "Antenna 1",
+                "path": "/scratch/s/sievers/mohanagr/mars_axion/baseband/",
+                "coordinates": [51.4646065, -68.2352594, 341.052],
+                "clock_offset": 0
+            }
+        },
+        "correlation": {
+            "start_timestamp": 1721361571,
+            "end_timestamp": 1721361681,
+            "osamp": 32768, 
+            "pfb_size_multiplier": 8
+        },
+        "frequency": {
+            "start_channel": 6, 
+            "end_channel": 7
+        }
+    }

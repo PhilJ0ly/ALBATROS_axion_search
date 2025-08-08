@@ -1,0 +1,8 @@
+Note that the Size chosen match those encountered to get 1 Hz resolution
+
+Testing PFB Speeds on 1879048192 Timestream with 100 Iterations
+    5.7275667881965635 s/iter 2624.567480728276 MSPS
+
+Testing IPFB Speeds on (524288, 2049) Input with 100 Iterations
+         4.015196132659912 s 2140.400770486577 MSPS
+

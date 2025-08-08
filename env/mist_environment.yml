@@ -1,0 +1,20 @@
+# Philippe Joly 2025-05-21
+# Purpose: Setup environment compatible with albatros_analysis on MIST
+#
+# Requirements: module load MitsEnv/2021a conda/2021.05 gcc/11.4.0 cuda/11.7.1
+# NOT TESTED USE mist_build.sh instead
+
+name: albatros
+channels:
+  - conda-forge
+  - defaults
+channel_priority: strict
+
+dependencies:
+  - python=3.10
+  - numpy=1.26.4
+  - numba=0.59.1
+  - matplotlib=3.8.3
+  - astropy=6.1.7
+  - skyfield=1.53
+  - cupy=13.1.0 

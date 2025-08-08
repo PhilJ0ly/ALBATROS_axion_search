@@ -1,0 +1,26 @@
+{
+        "antennas": {
+            "ALB1": {
+                "name": "Antenna 1",
+                "path": "/project/s/sievers/albatros/uapishka/202107/baseband/snap3/",
+                "coordinates": [51.4646065, -68.2352594, 341.052],
+                "clock_offset": 0
+            },
+            "ALB2": {
+                "name": "Antenna 2",
+                "path": "/project/s/sievers/albatros/uapishka/202107/baseband/snap1/",
+                "coordinates": [51.46418956, -68.23487849, 338.32526665],
+                "clock_offset": -15037392
+            }
+        },
+        "correlation": {
+            "start_timestamp": 1627454647.3676417,
+            "end_timestamp": 1627454840.64117,
+            "osamp": 64,
+            "pfb_size_multiplier": 256
+        },
+        "frequency": {
+            "start_channel": 32, 
+            "end_channel": 52
+        }
+    }
