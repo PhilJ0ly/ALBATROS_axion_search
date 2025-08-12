@@ -1,0 +1,508 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.5, pytest-8.4.1, pluggy-1.6.0 -- /home/philj0ly/albatros_analysis/bin/python
+cachedir: /scratch/philj0ly/out_pytest/.cache
+rootdir: /home/philj0ly/albatros_analysis/scripts/xcorr/test
+configfile: pytest.ini
+collecting ... collected 30 items
+
+test/helper_gpu_test.py::TestProcessingConfig::test_config_creation_with_defaults PASSED [  3%]
+test/helper_gpu_test.py::TestProcessingConfig::test_config_validation PASSED [  6%]
+test/helper_gpu_test.py::TestBufferSizes::test_lblock_scaling[1-1] PASSED [ 10%]
+test/helper_gpu_test.py::TestBufferSizes::test_lblock_scaling[2-2] PASSED [ 13%]
+test/helper_gpu_test.py::TestBufferSizes::test_lblock_scaling[4-4] PASSED [ 16%]
+test/helper_gpu_test.py::TestBufferSizes::test_lblock_scaling[8-8] PASSED [ 20%]
+test/helper_gpu_test.py::TestBufferSizes::test_buffer_size_consistency PASSED [ 23%]
+test/helper_gpu_test.py::TestBufferManager::test_buffer_manager_initialization PASSED [ 26%]
+test/helper_gpu_test.py::TestBufferManager::test_buffer_operations PASSED [ 30%]
+test/helper_gpu_test.py::TestBufferManager::test_buffer_overflow_handling PASSED [ 33%]
+test/helper_gpu_test.py::TestIPFBProcessing::test_ipfb_impulse_response FAILED [ 36%]
+test/helper_gpu_test.py::TestIPFBProcessing::test_ipfb_parseval_theorem FAILED [ 40%]
+test/helper_gpu_test.py::TestIPFBProcessing::test_ipfb_linearity PASSED  [ 43%]
+test/helper_gpu_test.py::TestPFBProcessing::test_pfb_window_function FAILED [ 46%]
+test/helper_gpu_test.py::TestPFBProcessing::test_pfb_impulse_response PASSED [ 50%]
+test/helper_gpu_test.py::TestPFBProcessing::test_pfb_frequency_resolution PASSED [ 53%]
+test/helper_gpu_test.py::TestRePFBRoundTrip::test_repfb_roundtrip_impulse FAILED [ 56%]
+test/helper_gpu_test.py::TestRePFBRoundTrip::test_repfb_roundtrip_sinusoid FAILED [ 60%]
+test/helper_gpu_test.py::TestMissingDataHandling::test_missing_data_tracker_accuracy PASSED [ 63%]
+test/helper_gpu_test.py::TestMissingDataHandling::test_missing_data_affects_multiple_blocks FAILED [ 66%]
+test/helper_gpu_test.py::TestChunkPlanning::test_plan_chunks_exact_fit PASSED [ 70%]
+test/helper_gpu_test.py::TestChunkPlanning::test_plan_chunks_with_remainder PASSED [ 73%]
+test/helper_gpu_test.py::TestChunkPlanning::test_plan_chunks_insufficient_data PASSED [ 76%]
+test/helper_gpu_test.py::TestIntegrationWithSyntheticData::test_correlation_coherence FAILED [ 80%]
+test/helper_gpu_test.py::TestErrorCases::test_invalid_configuration FAILED [ 83%]
+test/helper_gpu_test.py::TestErrorCases::test_zero_chunks PASSED         [ 86%]
+test/helper_gpu_test.py::TestErrorCases::test_missing_data_tracker_edge_cases PASSED [ 90%]
+test/helper_gpu_test.py::TestNumericalAccuracy::test_filter_stability PASSED [ 93%]
+test/helper_gpu_test.py::TestNumericalAccuracy::test_precision_consistency PASSED [ 96%]
+test/helper_gpu_test.py::TestNumericalAccuracy::test_correlation_hermiticity FAILED [100%]
+
+=================================== FAILURES ===================================
+________________ TestIPFBProcessing.test_ipfb_impulse_response _________________
+
+self = <helper_gpu_test.TestIPFBProcessing object at 0x14fec8ba41d0>
+simple_config = ProcessingConfig(acclen=64, pfb_size=4096, nchunks=10, nblock=16, chanstart=500, chanend=1500, osamp=1, nant=1, cut=5, filt_thresh=0.45, ntap=4, npol=2)
+
+    def test_ipfb_impulse_response(self, simple_config):
+        """Test IPFB with impulse input"""
+        # Create impulse in frequency domain
+        freq_impulse = cp.zeros((simple_config.acclen + 2*simple_config.cut, 2049), dtype=cp.complex64)
+        freq_impulse[simple_config.cut + 10, 1024] = 1.0  # Impulse at center frequency
+    
+        # Create filter
+        matft = pu.get_matft(simple_config.acclen + 2*simple_config.cut)
+        filt = pu.calculate_filter(matft, simple_config.filt_thresh)
+    
+        # Apply IPFB
+        time_output = pu.cupy_ipfb(freq_impulse, filt)
+    
+        # Check that output is real-valued time series
+        assert time_output.dtype == cp.complex64 or time_output.dtype == cp.float32
+        assert time_output.shape[0] == simple_config.acclen + 2*simple_config.cut
+    
+        # Energy should be preserved (approximately)
+        input_energy = cp.sum(cp.abs(freq_impulse)**2)
+        output_energy = cp.sum(cp.abs(time_output)**2)
+    
+        # Allow some tolerance due to filtering
+>       assert cp.abs(output_energy - input_energy) / input_energy < 0.1
+E       AssertionError: assert (array(0.99943745, dtype=float32) / array(1., dtype=float32)) < 0.1
+E        +  where array(0.99943745, dtype=float32) = <ufunc 'cupy_absolute'>((array(0.00056256, dtype=float32) - array(1., dtype=float32)))
+E        +    where <ufunc 'cupy_absolute'> = cp.abs
+
+test/helper_gpu_test.py:293: AssertionError
+----------------------------- Captured stdout call -----------------------------
+1212416 size in python
+1213008 size in python
+1212416 size in python
+________________ TestIPFBProcessing.test_ipfb_parseval_theorem _________________
+
+self = <helper_gpu_test.TestIPFBProcessing object at 0x14fec8ba4550>
+simple_config = ProcessingConfig(acclen=64, pfb_size=4096, nchunks=10, nblock=16, chanstart=500, chanend=1500, osamp=1, nant=1, cut=5, filt_thresh=0.45, ntap=4, npol=2)
+
+    def test_ipfb_parseval_theorem(self, simple_config):
+        """Test that IPFB preserves energy (Parseval's theorem)"""
+        # Create random frequency domain signal
+        np.random.seed(42)  # For reproducibility
+        freq_signal = cp.random.randn(simple_config.acclen + 2*simple_config.cut, 2049).astype(cp.complex64)
+        freq_signal += 1j * cp.random.randn(simple_config.acclen + 2*simple_config.cut, 2049).astype(cp.complex64)
+    
+        # Create filter
+        matft = pu.get_matft(simple_config.acclen + 2*simple_config.cut)
+        filt = pu.calculate_filter(matft, simple_config.filt_thresh)
+    
+        # Apply IPFB
+        time_output = pu.cupy_ipfb(freq_signal, filt)
+    
+        # Calculate energies
+        freq_energy = cp.sum(cp.abs(freq_signal)**2)
+        time_energy = cp.sum(cp.abs(time_output)**2)
+    
+        # Check energy preservation (with some tolerance for numerical errors and filtering)
+        energy_ratio = float(cp.abs(time_energy - freq_energy) / freq_energy)
+>       assert energy_ratio < 0.2, f"Energy not preserved: ratio = {energy_ratio}"
+E       AssertionError: Energy not preserved: ratio = 0.9994374513626099
+E       assert 0.9994374513626099 < 0.2
+
+test/helper_gpu_test.py:315: AssertionError
+__________________ TestPFBProcessing.test_pfb_window_function __________________
+
+self = <helper_gpu_test.TestPFBProcessing object at 0x14fec8ba50d0>
+pfb_config = ProcessingConfig(acclen=64, pfb_size=4096, nchunks=10, nblock=16, chanstart=0, chanend=1024, osamp=2, nant=1, cut=10, filt_thresh=0.45, ntap=4, npol=2)
+
+    def test_pfb_window_function(self, pfb_config):
+        """Test PFB window function properties"""
+        # Create PFB window
+        window = pu.sinc_hamming(pfb_config.ntap, 4096 * pfb_config.osamp)
+        cupy_window = cp.asarray(window, dtype=cp.float32)
+    
+        # Check window properties
+        assert len(window) == 4096 * pfb_config.osamp * pfb_config.ntap
+>       assert np.all(window >= 0)  # Window should be non-negative
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert np.False_
+E        +  where np.False_ = <function all at 0x14ff40409ab0>(array([-3.11853747e-18, -4.88311094e-06, -9.76682041e-06, ...,\n       -1.46511232e-05, -9.76681731e-06, -4.88311042e-06], shape=(32768,)) >= 0)
+E        +    where <function all at 0x14ff40409ab0> = np.all
+
+test/helper_gpu_test.py:366: AssertionError
+_______________ TestRePFBRoundTrip.test_repfb_roundtrip_impulse ________________
+
+self = <helper_gpu_test.TestRePFBRoundTrip object at 0x14fec8ba65d0>
+roundtrip_config = ProcessingConfig(acclen=32, pfb_size=4096, nchunks=5, nblock=8, chanstart=512, chanend=1536, osamp=2, nant=1, cut=4, filt_thresh=0.45, ntap=4, npol=2)
+
+    def test_repfb_roundtrip_impulse(self, roundtrip_config):
+        """Test that IPFB -> PFB roundtrip preserves impulse"""
+        sizes = BufferSizes.from_config(roundtrip_config)
+    
+        # Create impulse in original frequency domain
+        original_freq = cp.zeros((roundtrip_config.acclen + 2*roundtrip_config.cut, 2049), dtype=cp.complex64)
+        impulse_time_bin = roundtrip_config.cut + roundtrip_config.acclen // 2
+        impulse_freq_bin = 1024  # Center frequency
+        original_freq[impulse_time_bin, impulse_freq_bin] = 1.0
+    
+        # Setup filters and windows
+        matft = pu.get_matft(roundtrip_config.acclen + 2*roundtrip_config.cut)
+        ipfb_filter = pu.calculate_filter(matft, roundtrip_config.filt_thresh)
+        pfb_window = cp.asarray(pu.sinc_hamming(roundtrip_config.ntap, sizes.lblock), dtype=cp.float32)
+    
+        # Apply IPFB
+        time_stream = pu.cupy_ipfb(original_freq, ipfb_filter)
+    
+        # Remove edge effects and reshape for PFB
+        clean_time = time_stream[roundtrip_config.cut:-roundtrip_config.cut]
+        time_length = len(clean_time)
+    
+        # Pad and reshape for PFB processing
+        pfb_input_size = (roundtrip_config.nblock + roundtrip_config.ntap - 1) * sizes.lblock
+        if time_length < pfb_input_size:
+            # Pad with zeros
+            padded_time = cp.zeros((pfb_input_size, 4096), dtype=clean_time.dtype)
+            padded_time[:time_length] = clean_time
+        else:
+            padded_time = clean_time[:pfb_input_size]
+    
+        pfb_input = padded_time.reshape(-1, sizes.lblock)
+    
+        # Apply PFB
+        recovered_freq = pu.cupy_pfb(pfb_input.astype(cp.float32), pfb_window,
+                                    nchan=sizes.lblock//2 + 1, ntap=roundtrip_config.ntap)
+    
+        # Check that we can identify the impulse location
+        power_spectrum = cp.abs(recovered_freq)**2
+        max_power_time, max_power_freq = cp.unravel_index(cp.argmax(power_spectrum), power_spectrum.shape)
+    
+        # The impulse should be detectable (allowing for some spreading due to windowing)
+        assert cp.max(power_spectrum) > 0.01, "Impulse not detected in round-trip"
+    
+        # Check energy conservation (with tolerance for edge effects and windowing)
+        original_energy = cp.sum(cp.abs(original_freq)**2)
+        recovered_energy = cp.sum(cp.abs(recovered_freq)**2)
+        energy_ratio = float(cp.abs(recovered_energy - original_energy) / original_energy)
+    
+>       assert energy_ratio < 0.5, f"Energy not preserved in round-trip: ratio = {energy_ratio}"
+E       AssertionError: Energy not preserved in round-trip: ratio = 1.0912177562713623
+E       assert 1.0912177562713623 < 0.5
+
+test/helper_gpu_test.py:481: AssertionError
+----------------------------- Captured stdout call -----------------------------
+688128 size in python
+655680 size in python
+688128 size in python
+1476657128 size in python
+_______________ TestRePFBRoundTrip.test_repfb_roundtrip_sinusoid _______________
+
+self = <helper_gpu_test.TestRePFBRoundTrip object at 0x14fec8ba6c10>
+roundtrip_config = ProcessingConfig(acclen=32, pfb_size=4096, nchunks=5, nblock=8, chanstart=512, chanend=1536, osamp=2, nant=1, cut=4, filt_thresh=0.45, ntap=4, npol=2)
+
+    def test_repfb_roundtrip_sinusoid(self, roundtrip_config):
+        """Test IPFB -> PFB roundtrip with sinusoidal signal"""
+        sizes = BufferSizes.from_config(roundtrip_config)
+    
+        # Create sinusoidal signal in frequency domain
+        freq_signal = cp.zeros((roundtrip_config.acclen + 2*roundtrip_config.cut, 2049), dtype=cp.complex64)
+    
+        # Add a few frequency components
+        test_freqs = [800, 1000, 1200]  # Frequency bins
+        for freq_bin in test_freqs:
+            # Create sinusoidal modulation in time
+            time_indices = cp.arange(roundtrip_config.cut, roundtrip_config.acclen + roundtrip_config.cut)
+            modulation = cp.exp(2j * cp.pi * 0.1 * time_indices / roundtrip_config.acclen)
+            freq_signal[time_indices, freq_bin] = 0.5 * modulation
+    
+        # Setup processing components
+        matft = pu.get_matft(roundtrip_config.acclen + 2*roundtrip_config.cut)
+        ipfb_filter = pu.calculate_filter(matft, roundtrip_config.filt_thresh)
+        pfb_window = cp.asarray(pu.sinc_hamming(roundtrip_config.ntap, sizes.lblock), dtype=cp.float32)
+    
+        # Apply IPFB
+        time_stream = pu.cupy_ipfb(freq_signal, ipfb_filter)
+    
+        # Process for PFB
+        clean_time = time_stream[roundtrip_config.cut:-roundtrip_config.cut]
+        time_length = len(clean_time)
+    
+        pfb_input_size = (roundtrip_config.nblock + roundtrip_config.ntap - 1) * sizes.lblock
+        if time_length < pfb_input_size:
+            padded_time = cp.zeros((pfb_input_size, 4096), dtype=clean_time.dtype)
+            padded_time[:time_length] = clean_time
+        else:
+            padded_time = clean_time[:pfb_input_size]
+    
+        pfb_input = padded_time.reshape(-1, sizes.lblock)
+    
+        # Apply PFB
+        recovered_freq = pu.cupy_pfb(pfb_input.astype(cp.float32), pfb_window,
+                                    nchan=sizes.lblock//2 + 1, ntap=roundtrip_config.ntap)
+    
+        # Analyze spectral content
+        avg_power = cp.mean(cp.abs(recovered_freq)**2, axis=0)
+    
+        # Check that signal is recovered
+>       assert cp.max(avg_power) > 0.001, "Signal not detected in round-trip"
+E       AssertionError: Signal not detected in round-trip
+E       assert array(0.0003194, dtype=float32) > 0.001
+E        +  where array(0.0003194, dtype=float32) = <function amax at 0x14fecff180e0>(array([4.3735760e-14, 4.3703661e-14, 4.3719694e-14, ..., 5.8409822e-12,\n       5.8409172e-12, 5.8410009e-12], shape=(4097,), dtype=float32))
+E        +    where <function amax at 0x14fecff180e0> = cp.max
+
+test/helper_gpu_test.py:527: AssertionError
+______ TestMissingDataHandling.test_missing_data_affects_multiple_blocks _______
+
+self = <helper_gpu_test.TestMissingDataHandling object at 0x14fec8ba7a50>
+
+    def test_missing_data_affects_multiple_blocks(self):
+        """Test tracking when missing data affects multiple PFB blocks"""
+        tracker = MissingDataTracker(1, 5)
+    
+        # Add chunk that affects 3 blocks
+        chunk = {"specnums": np.arange(70)}
+        tracker.add_chunk_info(0, chunk, 100, 3)
+    
+        # Calculate for first job - should include this chunk
+        tracker.calculate_job_average(0, 0)
+>       assert tracker.missing_fraction[0, 0] == 30.0
+E       assert np.float64(30.000000000000004) == 30.0
+
+test/helper_gpu_test.py:571: AssertionError
+_________ TestIntegrationWithSyntheticData.test_correlation_coherence __________
+
+self = <helper_gpu_test.TestIntegrationWithSyntheticData object at 0x14fec8b8d790>
+integration_config = ProcessingConfig(acclen=32, pfb_size=4096, nchunks=20, nblock=8, chanstart=400, chanend=600, osamp=2, nant=2, cut=4, filt_thresh=0.45, ntap=4, npol=2)
+
+    def test_correlation_coherence(self, integration_config):
+        """Test that injected coherent signals produce correlations"""
+    
+        # Create specific test with known coherent signal
+        class CoherentSignalIterator:
+            def __init__(self, config, ant_idx, signal_strength=1.0):
+                self.config = config
+                self.ant_idx = ant_idx
+                self.signal_strength = signal_strength
+                self.spec_num_start = 0
+                self.current_chunk = 0
+                self.obj = Mock()
+                self.obj.channels = np.arange(2049)
+    
+            def __iter__(self):
+                return self
+    
+            def __next__(self):
+                if self.current_chunk >= self.config.nchunks:
+                    raise StopIteration
+    
+                chunk = {}
+    
+                # Create coherent signal at specific frequency
+                coherent_freq_bin = 500  # Within processing range
+                coherent_signal = self.signal_strength * np.exp(
+                    2j * np.pi * 0.2 * np.arange(self.config.acclen) / self.config.acclen +
+                    1j * self.ant_idx * np.pi / 4  # Different phase per antenna
+                )
+    
+                for pol in range(self.config.npol):
+                    # Mostly noise
+                    data = 0.1 * (
+                        np.random.randn(self.config.acclen, 2049) +
+                        1j * np.random.randn(self.config.acclen, 2049)
+                    ).astype(np.complex64)
+    
+                    # Add coherent signal
+                    if pol == 0:  # Only first polarization
+                        data[:, coherent_freq_bin] += coherent_signal
+    
+                    chunk[f"pol{pol}"] = data
+    
+                chunk["specnums"] = np.arange(
+                    self.current_chunk * self.config.acclen,
+                    (self.current_chunk + 1) * self.config.acclen
+                )
+    
+                self.current_chunk += 1
+                return chunk
+    
+        # Create test with coherent signals
+        with patch('albatros_analysis.src.correlations.baseband_data_classes.BasebandFileIterator') as mock_iterator_class:
+            mock_iterators = []
+            signal_strength = 2.0
+    
+            for ant_idx in range(integration_config.nant):
+                mock_iter = CoherentSignalIterator(integration_config, ant_idx, signal_strength)
+                mock_iterators.append(mock_iter)
+    
+            mock_iterator_class.side_effect = mock_iterators
+    
+            # Run processing
+            idxs = list(range(integration_config.nant))
+            files = [f'coherent_test_{i}.dat' for i in range(integration_config.nant)]
+    
+>           vis, _, freqs, _, _ = repfb_xcorr_avg(
+                idxs=idxs, files=files,
+                acclen=integration_config.acclen,
+                nchunks=integration_config.nchunks,
+                nblock=integration_config.nblock,
+                chanstart=integration_config.chanstart,
+                chanend=integration_config.chanend,
+                osamp=integration_config.osamp,
+                cut=integration_config.cut
+            )
+
+test/helper_gpu_test.py:868: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+helper_gpu_stream_clean.py:408: in repfb_xcorr_avg
+    fill_pfb_buffer(
+helper_gpu_stream_clean.py:308: in fill_pfb_buffer
+    buffer_full = ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnum)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+helper_gpu_stream_clean.py:182: in process_chunk
+    self.buffers.pol[2*self.config.cut:] = bdc.make_continuous_gpu(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+cupy/_core/core.pyx:1594: in cupy._core.core._ndarray_base.__setitem__
+    ???
+cupy/_core/_routines_indexing.pyx:51: in cupy._core._routines_indexing._ndarray_setitem
+    ???
+cupy/_core/_routines_indexing.pyx:1017: in cupy._core._routines_indexing._scatter_op
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+>   ???
+E   ValueError: non-scalar numpy.ndarray cannot be used for fill
+
+cupy/_core/core.pyx:738: ValueError
+__________________ TestErrorCases.test_invalid_configuration ___________________
+
+self = <helper_gpu_test.TestErrorCases object at 0x14fec8b8df50>
+
+    def test_invalid_configuration(self):
+        """Test handling of invalid configurations"""
+    
+        # Test chanend <= chanstart
+>       with pytest.raises((ValueError, AssertionError, IndexError)):
+E       Failed: DID NOT RAISE any of (<class 'ValueError'>, <class 'AssertionError'>, <class 'IndexError'>)
+
+test/helper_gpu_test.py:1025: Failed
+______________ TestNumericalAccuracy.test_correlation_hermiticity ______________
+
+self = <helper_gpu_test.TestNumericalAccuracy object at 0x14fec8b800d0>
+
+    def test_correlation_hermiticity(self):
+        """Test that correlation matrices are Hermitian"""
+        # Create small test with synthetic data
+        config = ProcessingConfig(
+            acclen=16, pfb_size=4096, nchunks=5, nblock=4,
+            chanstart=500, chanend=520, osamp=1, nant=2
+        )
+    
+        with patch('albatros_analysis.src.correlations.baseband_data_classes.BasebandFileIterator') as mock_iterator_class:
+    
+            class HermitianTestIterator:
+                def __init__(self, ant_idx):
+                    self.ant_idx = ant_idx
+                    self.spec_num_start = 0
+                    self.current_chunk = 0
+                    self.obj = Mock()
+                    self.obj.channels = np.arange(2049)
+    
+                def __iter__(self):
+                    return self
+    
+                def __next__(self):
+                    if self.current_chunk >= config.nchunks:
+                        raise StopIteration
+    
+                    chunk = {}
+                    # Create deterministic data for reproducible test
+                    for pol in range(config.npol):
+                        data = np.zeros((config.acclen, 2049), dtype=np.complex64)
+    
+                        # Add deterministic signal
+                        freq_bin = 510
+                        phase = 2 * np.pi * self.ant_idx / config.nant
+                        data[:, freq_bin] = np.exp(1j * phase) * (1.0 + 0.1j)
+    
+                        chunk[f"pol{pol}"] = data
+    
+                    chunk["specnums"] = np.arange(
+                        self.current_chunk * config.acclen,
+                        (self.current_chunk + 1) * config.acclen
+                    )
+                    self.current_chunk += 1
+                    return chunk
+    
+            mock_iterators = [HermitianTestIterator(i) for i in range(config.nant)]
+            mock_iterator_class.side_effect = mock_iterators
+    
+            # Run processing
+>           vis, _, _, _, _ = repfb_xcorr_avg(
+                idxs=list(range(config.nant)),
+                files=[f'hermitian_test_{i}.dat' for i in range(config.nant)],
+                acclen=config.acclen,
+                nchunks=config.nchunks,
+                nblock=config.nblock,
+                chanstart=config.chanstart,
+                chanend=config.chanend,
+                osamp=config.osamp
+            )
+
+test/helper_gpu_test.py:1145: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+helper_gpu_stream_clean.py:408: in repfb_xcorr_avg
+    fill_pfb_buffer(
+helper_gpu_stream_clean.py:308: in fill_pfb_buffer
+    buffer_full = ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnum)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+helper_gpu_stream_clean.py:182: in process_chunk
+    self.buffers.pol[2*self.config.cut:] = bdc.make_continuous_gpu(
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+cupy/_core/core.pyx:1594: in cupy._core.core._ndarray_base.__setitem__
+    ???
+cupy/_core/_routines_indexing.pyx:51: in cupy._core._routines_indexing._ndarray_setitem
+    ???
+cupy/_core/_routines_indexing.pyx:1017: in cupy._core._routines_indexing._scatter_op
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+>   ???
+E   ValueError: non-scalar numpy.ndarray cannot be used for fill
+
+cupy/_core/core.pyx:738: ValueError
+----------------------------- Captured stdout call -----------------------------
+622592 size in python
+========================= 9 failed, 21 passed in 2.30s =========================
+axis 1, get plan r2c
+the plan in C has value 1
+plan worksize in C has value 1212416
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 2
+plan worksize in C has value 1213008
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 3
+plan worksize in C has value 1212416
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 4
+plan worksize in C has value 524416
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 5
+plan worksize in C has value 688128
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 6
+plan worksize in C has value 655680
+plan worksize in C has size 8
+axis 1, get plan c2r
+the plan in C has value 7
+plan worksize in C has value 688128
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 8
+plan worksize in C has value 1476657128
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 9
+plan worksize in C has value 1081344
+plan worksize in C has size 8
+axis 1, get plan r2c
+the plan in C has value 10
+plan worksize in C has value 622592
+plan worksize in C has size 8

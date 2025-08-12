@@ -96,7 +96,9 @@ void cufft_r2c_mohan(cufftComplex *out, float * data, int nrows, int ncols, cuff
         if (error!=CUFFT_SUCCESS)
         {
             fprintf(stderr,"R2C (%d, %d) FAILED\n", nrows, ncols);
-            fprintf(stderr,_cufftGetErrorEnum(error));
+            // fprintf(stderr,_cufftGetErrorEnum(error));
+            fprintf(stderr, "%s", _cufftGetErrorEnum(error));
+
             exit(EXIT_FAILURE);
         }
         // cudaDeviceSynchronize();
@@ -139,7 +141,9 @@ void cufft_c2c(cufftComplex *out, cufftComplex * data, int nrows, int ncols, int
         if (error!=CUFFT_SUCCESS)
         {
             fprintf(stderr,"C2C (%d, %d) FAILED\n", nrows, ncols);
-            fprintf(stderr,_cufftGetErrorEnum(error));
+            // fprintf(stderr,_cufftGetErrorEnum(error));
+            fprintf(stderr, "%s", _cufftGetErrorEnum(error));
+
             exit(EXIT_FAILURE);
         }
         // cudaDeviceSynchronize();
@@ -229,8 +233,8 @@ void get_plan_r2c(int nrows, int ncols, cufftHandle *plan, size_t * work_size)
     if (cufftMakePlan1d(*plan, ncols, CUFFT_R2C, nrows, work_size)!=CUFFT_SUCCESS)
         fprintf(stderr,"Error planning dft.\n");
     printf("the plan in C has value %d\n", *plan);
-    printf("plan worksize in C has value %d\n", *work_size);
-    printf("plan worksize in C has size %d\n", sizeof(work_size));
+    printf("plan worksize in C has value %zu\n", *work_size);
+    printf("plan worksize in C has size %zu\n", sizeof(work_size));
 }
 /*--------------------------------------------------------------------------------*/
 void get_plan_c2r(int nrows, int ncols, cufftHandle *plan, size_t * work_size)
@@ -264,8 +268,8 @@ void get_plan_c2r(int nrows, int ncols, cufftHandle *plan, size_t * work_size)
     if (cufftMakePlan1d(*plan, ncols, CUFFT_C2R, nrows, work_size)!=CUFFT_SUCCESS)
         fprintf(stderr,"Error planning dft.\n");
     printf("the plan in C has value %d\n", *plan);
-    printf("plan worksize in C has value %d\n", *work_size);
-    printf("plan worksize in C has size %d\n", sizeof(work_size));
+    printf("plan worksize in C has value %zu\n", *work_size);
+    printf("plan worksize in C has size %zu\n", sizeof(work_size));
 }
 void get_plan_c2c(int nrows, int ncols, cufftHandle *plan, size_t * work_size)
 {
@@ -298,8 +302,8 @@ void get_plan_c2c(int nrows, int ncols, cufftHandle *plan, size_t * work_size)
     if (cufftMakePlan1d(*plan, ncols, CUFFT_C2C, nrows, work_size)!=CUFFT_SUCCESS)
         fprintf(stderr,"Error planning dft.\n");
     printf("the plan in C has value %d\n", *plan);
-    printf("plan worksize in C has value %d\n", *work_size);
-    printf("plan worksize in C has size %d\n", sizeof(work_size));
+    printf("plan worksize in C has value %zu\n", *work_size);
+    printf("plan worksize in C has size %zu\n", sizeof(work_size));
 }
         
 /*--------------------------------------------------------------------------------*/

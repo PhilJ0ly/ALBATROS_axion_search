@@ -46,9 +46,19 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
     
     dwin=pu.sinc_hamming(ntap,nn)
     cupy_win_big=cp.asarray(dwin,dtype='float32',order='c')
+    
 
-    matft = cp.asnumpy(pu.get_matft(pfb_size))
-    filt = cp.asarray(pu.compute_filter(matft, filt_thresh))
+    # CPU version if not enough memory
+        # dwin=pu.sinc_hamming(ntap,nn)
+        # cupy_win_big=cp.asarray(dwin,dtype='float32',order='c')
+
+        # matft = cp.asnumpy(pu.get_matft(pfb_size))
+        # filt = cp.asarray(pu.compute_filter(matft, filt_thresh))
+
+    matft = pu.get_matft(pfb_size)
+    filt = pu.calculate_filter(matft, filt_thresh)
+
+
 
     # matft=pu.get_matft(pfb_size)
     to_ipfb_pol0 = cp.empty((pfb_size,2049),dtype='complex64', order='C') 
@@ -115,7 +125,7 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
     count = 0
     for i, chunks in enumerate(zip(*antenna_objs)):
         t0 = time.perf_counter()
-        if i%10==0: print(i)
+        # if i%10==0: print(i)
         start_event.record()
         for j in range(nant):
             chunk=chunks[j]
@@ -131,8 +141,8 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
             to_ipfb_pol1[:2*cut] = cut_chunks[j,1,:,:] # <---- zeros for CHUNK 0
             to_ipfb_pol1[2*cut:] = pol1
 
-            if count%100 == 0 : 
-                print("to ipfb mean", np.mean(to_ipfb_pol0))
+            # if count%100 == 0 : 
+            #     print("to ipfb mean", np.mean(to_ipfb_pol0))
 
             raw_pol0 = pu.cupy_ipfb(to_ipfb_pol0, filt)
             raw_pol1 = pu.cupy_ipfb(to_ipfb_pol1, filt)
@@ -143,8 +153,8 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
    
             cut_chunks[j,0,:,:] = pol0[-2*cut:,:]
             cut_chunks[j,1,:,:] = pol1[-2*cut:,:]
-            xin[j*nant,:,:] = pol0_new[:, repfb_chanstart : repfb_chanend] # BFI data is C-major for IPFB
-            xin[j*nant+1,:,:] = pol1_new[:, repfb_chanstart : repfb_chanend] #gotta support arbitrary chans
+            xin[j*npol,:,:] = pol0_new[:, repfb_chanstart : repfb_chanend] # BFI data is C-major for IPFB
+            xin[j*npol+1,:,:] = pol1_new[:, repfb_chanstart : repfb_chanend] #gotta support arbitrary chans
         
         out=cr.avg_xcorr_all_ant_gpu(xin,nant,npol,re_pfb_size,nchan,split=1,out=scratch)
         end_event.record()
@@ -154,9 +164,9 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
 
         tot += time.perf_counter()-t0
         count += 1
-        if count %100==0:
+        if count %1000==0:
             print("niter", count, "time", tot/count, "s BW", 2*nant*pol0.nbytes/tot*count/1e6, "MSPS")
-            print(np.mean(xin))
+            # print(np.mean(xin))
             # print("to_ipfb", to_ipfb_pol0.dtype, "raw_pol", raw_pol0.dtype, "pol_new", pol0_new.dtype, "xin", xin.dtype)
 
     print("niter", count, "time", tot/count, "s BW", 2*nant*pol0.nbytes/tot*count/1e6, "MSPS")

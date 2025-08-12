@@ -3,6 +3,10 @@
 #include <stdint.h>
 #include <omp.h>
 
+// for GPU
+// gcc -c -fPIC -fopenmp -lm correlations_cpu.c; gcc -shared -o lib_correlations_cpu2.so correlations_cpu.o -fopenmp; rm -f correlations_cpu.o
+
+
 void autocorr_4bit(uint8_t * data, uint8_t * corr, uint32_t nspec, uint32_t ncol)
 {
     /*

@@ -1,0 +1,18 @@
+BDC is using numpy
+Testing IPFB Speeds with 100 Iterations
+{'osamp': 64, 'pfb_mult': 256, 'name': 'Osamp (64) pfb_mult (256)', 'nslice': 16384}
+Generating CPU matft...
+Testing threshold functions...
+
+thresh
+         0.010432891845703125 25732.86754722478
+thresh optimized
+         0.009733998775482177 27580.466177601436
+thresh vectorized
+         0.009384617805480958 28607.26239093134
+Testing IPFB functions...
+
+ipfb
+         0.13700780391693115 1960.2279601739613
+ipfb.T
+         0.10207951307296753 2630.9542425817194

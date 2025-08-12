@@ -1,0 +1,19 @@
+niter=1e3
+
+BDC is using numpy
+{'osamp': 64, 'pfb_mult': 256, 'name': 'Osamp (64) pfb_mult (256)', 'nslice': 16384}
+Generating CPU matft...
+mat size is (4096, 16384) 0.25 GB
+
+Running CPU IPFB...
+0.056960049152374265 s per iteration. 17.556164625576294 Hz
+    irfft 1 0.009647690534591675
+    dd.T 2.626180648803711e-06
+    rfft 0.021441139936447143
+    new thresh 0.010418503284454346
+    irfft 2 0.012110244989395141
+
+Running CPU PFB...
+0.22485426831245423 s per iteration. 4.447324960762651 Hz
+    polyphase 0.157736346244812
+    rfft 0.0652463300228119

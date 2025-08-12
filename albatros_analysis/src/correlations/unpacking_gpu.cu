@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <stdint.h>
-#include "/usr/include/cuda_runtime.h"
-#include "/usr/include/device_launch_parameters.h"
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
 
+// nvcc -Xcompiler -fPIC -o lib_unpacking2.so unpacking_gpu.cu -shared
 __global__ void dropped_packets_kernel(uint8_t *data, unsigned long *spec_num, unsigned int num_packets, const int spectra_per_packet, unsigned int entries_per_packet)
 {
 	unsigned int i = blockDim.x * blockIdx.x + threadIdx.x;

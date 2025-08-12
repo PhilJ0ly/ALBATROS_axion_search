@@ -19,7 +19,6 @@ import numpy as np
 import time
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
-
 import ctypes
 lib = ctypes.CDLL('./libcgemm_batch.so')
 
@@ -190,7 +189,7 @@ class IPFBProcessor:
         )
         
         # Apply inverse PFB and remove edge effects and add chunk to PFB buffer
-        return self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(pol_data, self.filt)[self.config.cut:-self.config.cut].ravel())
+        return self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
 
 
 class MissingDataTracker:

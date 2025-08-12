@@ -23,9 +23,10 @@ import argparse
 from os import path
 import os
 import sys
-import helper
 sys.path.insert(0,path.expanduser("~"))
 import json
+
+import helper
 
 if __name__=="__main__":
 
@@ -66,7 +67,8 @@ if __name__=="__main__":
     pfb_mult = config["correlation"]["pfb_size_multiplier"]
     
     pfb_size = osamp*pfb_mult
-    outdir = f"/project/s/sievers/philj0ly/xcorr_{pUnit}"
+    # outdir = f"/project/rrg-sievers/philj0ly/xcorr_{pUnit}"
+    outdir = f"/scratch/philj0ly/xcorr_{pUnit}"
     
     # assert pfb_mult >= 8 
 
@@ -92,20 +94,20 @@ if __name__=="__main__":
 
     t1=time.time()
     if pUnit == "gpu":
+        # from helper_gpu import repfb_xcorr_avg
+        # pols,missing_fraction,channels = repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=16,filt_thresh=0.45)
+
         # from helper_gpu_stream import repfb_xcorr_avg
-        from helper_gpu_stream_clean import repfb_xcorr_avg
-        
-        # pols,missing_fraction,channels=repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize,filt_thresh=0.45)
+        # pols,missing_fraction,channels, _,_=repfb_xcorr_avg(idxs,files,acclen,nchunks, 3, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
 
-        pols,missing_fraction,channels=repfb_xcorr_avg(idxs,files,acclen,nchunks,3, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
-
-        # raise ValueError
+        from helper_gpu_stream_clean import repfb_xcorr_avg        
+        pols,missing_fraction,channels, _, _ =repfb_xcorr_avg(idxs,files,acclen,nchunks,3, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
     else:
         import helper_cpu
         os.environ['NUMBA_OPT']='3'
         os.environ['NUMBA_LOOP_VECTORIZE']='1'
         os.environ['NUMBA_ENABLE_AVX']='1'
-        os.environ['NUMBA_CACHE_DIR'] = '/scratch/s/sievers/philj0ly/tmp/my_numba_cache'
+        os.environ['NUMBA_CACHE_DIR'] = '/scratch/philj0ly/tmp/my_numba_cache'
 
         pols,missing_fraction,channels=helper_cpu.repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize,filt_thresh=0.45, n_cores=n_cores)
 
@@ -113,8 +115,8 @@ if __name__=="__main__":
     
     print("Processing took", t2-t1, "s")
 
-    fname = f"stream_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(nchunks)}_{chanstart}_{chanend}.npz"
-    fGPUname = f"stream_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(njobs)}_{chanstart}_{chanend}.npz"
+    fname = f"clean2_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(nchunks)}_{chanstart}_{chanend}.npz"
+    # fGPUname = f"stream_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(njobs)}_{chanstart}_{chanend}.npz"
     fpath = path.join(outdir,fname)
     np.savez(fpath,data=pols.data,mask=pols.mask,missing_fraction=missing_fraction,chans=channels)
 

@@ -8,6 +8,7 @@ from albatros_analysis.src.utils import pycufft
 # from cupy.fft import rfft, pycufft.irfft
 import time
 from albatros_analysis.src.utils.pfb_utils import *
+import os
 
 
 def print_mem(stri):
@@ -53,7 +54,34 @@ def compute_filter(matft, thresh):
         
     return filt  
 
-def cupy_ipfb(dat,filt):
+def cupy_ipfb(dat, filt):
+    print(f"Input dat shape: {dat.shape}")
+    print(f"Filter shape: {filt.shape}")
+    
+    dd = pycufft.irfft(dat, axis=1)
+    print(f"After first IRFFT: {dd.shape}")
+    
+    dd2 = dd.T.copy()
+    print(f"After transpose: {dd2.shape}")
+    
+    ddft = pycufft.rfft(dd2, axis=1)
+    print(f"After second RFFT: {ddft.shape}")
+    print(f"ddft energy before filter: {cp.sum(cp.abs(ddft)**2)}")
+    
+    # Check if shapes are compatible
+    print(f"Filter shape: {filt.shape}")
+    if ddft.shape != filt.shape:
+        print(f"WARNING: Shape mismatch! ddft: {ddft.shape}, filt: {filt.shape}")
+    
+    ddft = ddft * filt
+    print(f"ddft energy after filter: {cp.sum(cp.abs(ddft)**2)}")
+    
+    res = pycufft.irfft(ddft, axis=1)
+    res = res.T
+    print(f"Final result shape: {res.shape}")
+    return res
+
+def cupy_ipfb_true(dat,filt):
 
     """On-device ipfb. Expects the data to be iPFB'd to live in GPU memory.
 
@@ -130,7 +158,6 @@ def get_matft(nslice,nchan=2049,ntap=4):
 
     # Frees memory
     cupy_win = None
-    
     mat=mat.T.copy()
     matft=pycufft.rfft(mat,axis=1)
     

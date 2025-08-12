@@ -1,0 +1,23 @@
+--- GPU perfromance -- niter=1e3
+
+{'osamp': 64, 'pfb_mult': 256, 'name': 'Osamp (64) pfb_mult (256)', 'nslice': 16384}
+
+Generating GPU matft...
+Running GPU PFB...
+Done!
+
+{
+    "IPFB": {
+        "GPU": [
+            0.01029842734336853, # s/iter
+            97.10220470156837    # Hz
+        ]
+    },
+    "PFB": {
+        "GPU": [
+            0.007974438190460205,
+            125.40068354862876
+        ]
+    }
+}
+

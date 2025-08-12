@@ -4,6 +4,8 @@
 #include <math.h>
 #include <omp.h>
 
+// gcc -c -fPIC -fopenmp -lm unpacking.c; gcc -shared -o lib_unpacking2.so unpacking.o -fopenmp; rm -f unpacking.o
+
 void hist_4bit(uint8_t * data, uint64_t * hist, int rowstart, int rowend, int nchan, int nbins, int mode)
 {/*
 	Default implementation assumes bins are 0 indexed, of width = 1, and nbins = len(hist)-1.

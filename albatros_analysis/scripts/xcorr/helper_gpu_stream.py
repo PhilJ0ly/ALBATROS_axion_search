@@ -108,6 +108,10 @@ def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,c
     repfb_chanstart = channels[aa.obj.chanstart] * osamp
     repfb_chanend = channels[aa.obj.chanend] * osamp 
 
+    # print("repfb_chanstart", repfb_chanstart, "repfb_chanend", repfb_chanend)
+    # print(osamp)
+    # raise ValueError("German Shepherds are the best dogs")
+
 
     start_specnums = [ant.spec_num_start for ant in antenna_objs] 
     start_event = cp.cuda.Event()
@@ -219,7 +223,7 @@ def repfb_xcorr_avg(idxs,files,acclen,nchunks, nblock, chanstart,chanend,osamp,c
                         print(f"{s+1}/{len(job_chunks)} (Ant {j}, pol {k}): Incomplete pfb_buffer with only {pfb_idx[j,k]} instead of {szblock}")
                     pfb_buf[j,k].flat[pfb_idx[j,k]:] = 0.
 
-                xin[j*nant+k,:,:] = pu.cupy_pfb(pfb_buf[j,k],cupy_win_big,nchan=2048*osamp+1,ntap=4)[:, repfb_chanstart : repfb_chanend]
+                xin[j*npol+k,:,:] = pu.cupy_pfb(pfb_buf[j,k],cupy_win_big,nchan=2048*osamp+1,ntap=4)[:, repfb_chanstart : repfb_chanend]
 
                 if k == 0:
                     # Calculate the average missing percentage 

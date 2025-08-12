@@ -18,7 +18,7 @@ Description:
 EOF
 }
 
-REQ='/home/philj0ly/env/trillium_albatros_requirements.txt'
+REQ='/home/philj0ly/env/trillium_cpu_albatros_requirements.txt'
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     show_help 
@@ -28,7 +28,6 @@ else
     module load StdEnv/2023 
     module load python/3.11.5
     module load gcc/12.3
-    module load cuda/12.6
     ARG1="${1:-pythonEnv}"
     
     # Create virtual environment and activate it

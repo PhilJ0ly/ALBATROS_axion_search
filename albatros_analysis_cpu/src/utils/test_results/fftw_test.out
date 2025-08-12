@@ -1,0 +1,91 @@
+niter = 100
+
+FLOAT -- (float32/complex64)
+starting speed test 221x262144, axis=1
+
+FFTW
+    avg time taken for fftw axis=1 0.048s, BW 9653.492 MSPS
+    avg time taken for rfftw axis=1 0.034s, BW 6837.378 MSPS
+    avg time taken for irfftw axis=1 0.151s, BW 3070.041 MSPS
+
+SciPy
+    avg time taken for scipy fft axis=1 0.060s, BW 7764.422 MSPS
+    avg time taken for scipy rfft axis=1 0.057s, BW 4075.383 MSPS
+    avg time taken for scipy irfft axis=1 0.260s, BW 1781.662 MSPS
+
+
+
+LONG DOUBLE -- (float64/complex128)
+
+starting speed test 221x262144, axis=1
+
+FFTW
+    avg time taken for fftw axis=1 0.079s, BW 11801.283 MSPS
+    avg time taken for rfftw axis=1 0.049s, BW 9512.139 MSPS
+    avg time taken for irfftw axis=1 0.189s, BW 4898.044 MSPS
+
+SciPy
+    avg time taken for scipy fft axis=1 0.131s, BW 7073.495 MSPS
+    avg time taken for scipy rfft axis=1 0.114s, BW 4056.769 MSPS
+    avg time taken for scipy rfft axis=1 0.528s, BW 1755.218 MSPS
+
+
+
+starting speed test 2049x524288, axis=1
+
+FFTW
+    avg time taken for fftw axis=1 1.124s, BW 15288.155 MSPS
+    avg time taken for rfftw axis=1 0.760s, BW 11309.475 MSPS
+    avg time taken for irfftw axis=1 14.263s, BW 1205.118 MSPS
+
+SciPy
+    avg time taken for scipy fft axis=1 3.105s, BW 5535.335 MSPS
+    avg time taken for scipy rfft axis=1 2.424s, BW 3545.690 MSPS
+    avg time taken for scipy irfft axis=1 24.527s, BW 700.782 MSPS
+
+
+
+starting speed test 16384x2049, axis=1
+
+FFTW 
+    avg time taken for fftw axis=1 0.046s, BW 11726.253 MSPS
+    avg time taken for rfftw axis=1 8.027s, BW 33.459 MSPS
+    avg time taken for irfftw axis=1 0.036s, BW 14857.381 MSPS
+
+SciPy
+    avg time taken for scipy fft axis=1 0.042s, BW 12729.456 MSPS
+    avg time taken for scipy rfft axis=1 0.039s, BW 6858.607 MSPS
+    avg time taken for scipy irfft axis=1 0.016s, BW 33838.317 MSPS
+
+
+
+starting speed test 4096x16384, axis=1
+
+FFTW
+    avg time taken for fftw axis=1 0.045s, BW 23622.356 MSPS
+    avg time taken for rfftw axis=1 0.025s, BW 21526.282 MSPS
+    avg time taken for irfftw axis=1 0.162s, BW 6635.163 MSPS
+
+SciPy
+    avg time taken for scipy fft axis=1 0.064s, BW 16853.525 MSPS
+    avg time taken for scipy rfft axis=1 0.020s, BW 26810.374 MSPS
+    avg time taken for scipy irfft axis=1 0.158s, BW 6797.578 MSPS
+
+
+
+starting speed test 524288x2049, axis=1
+avg time taken for irfftw axis=1 0.639s, BW 26891.534 MSPS
+avg time taken for scipy irfft axis=1 0.495s, BW 34722.413 MSPS
+
+starting speed test 4096x262145, axis=1
+avg time taken for irfftw axis=1 1.850s, BW 9286.814 MSPS
+avg time taken for scipy irfft axis=1 4.505s, BW 3813.584 MSPS
+
+
+starting speed test 4096x524288, axis=1
+avg time taken for rfftw axis=1 1.971s, BW 8714.780 MSPS
+avg time taken for scipy rfft axis=1 4.880s, BW 3520.797 MSPS
+
+
+
+

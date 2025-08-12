@@ -1,0 +1,60 @@
+Environment: albatros_analysis_cpu
+Created on: Fri 08 Aug 2025 03:13:35 PM EDT
+
+=== Pip Packages ===
+Package           Version
+----------------- -------------------------
+astropy           7.0.1+computecanada
+astropy-iers-data 0.2025.8.4.0.42.59
+certifi           2025.8.3
+contourpy         1.3.1+computecanada
+cycler            0.12.1+computecanada
+fonttools         4.59.0+computecanada
+jplephem          2.23
+kiwisolver        1.4.8+computecanada
+llvmlite          0.44.0+computecanada
+matplotlib        3.10.1+computecanada
+numba             0.61.2+computecanada
+numpy             2.2.2+computecanada
+packaging         25.0+computecanada
+pandas            2.2.3+computecanada
+pillow            11.1.0+computecanada
+pip               25.2
+psutil            6.1.1+computecanada
+pyerfa            2.0.1.5+computecanada
+pyparsing         3.2.3+computecanada
+python_dateutil   2.9.0.post0+computecanada
+pytz              2025.2+computecanada
+PyYAML            6.0.2+computecanada
+scipy             1.15.2+computecanada
+setuptools        65.5.0
+sgp4              2.25
+six               1.17.0+computecanada
+skyfield          1.53
+tzdata            2025.2+computecanada
+
+=== Loaded Modules ===
+
+Currently Loaded Modules:
+  1) CCconfig            9) ucx/1.14.1
+  2) gentoo/2023   ([1;31mS[0m)  10) libfabric/1.18.0
+  3) StdEnv/2023   ([1;31mS[0m)  11) pmix/4.2.4
+  4) mii/1.1.2          12) ucc/1.2.0
+  5) python/3.11.5 ([1;34mt[0m)  13) openmpi/4.1.5    ([1;31mm[0m)
+  6) [2mgcccore/.12.3[0m (H)  14) flexiblas/3.3.1
+  7) gcc/12.3      ([1;34mt[0m)  15) aocl-blas/5.1
+  8) hwloc/2.9.1        16) aocl-lapack/5.1
+
+  Where:
+   [1;31mS[0m:  Module is Sticky, requires --force to unload or purge
+   [1;31mm[0m:  MPI implementations / Implémentations MPI
+   [1;34mt[0m:  Tools for development / Outils de développement
+   H:             Hidden Module
+
+ 
+
+
+=== System Information ===
+CUDA Version: 
+GCC Version: gcc (Gentoo 12.3.1_p20230526 p2) 12.3.1 20230526
+Python Version: Python 3.11.5

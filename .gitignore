@@ -4,6 +4,9 @@
 .Xauthority
 .trisetup
 .gitconfig
+.wget-hsts
+.dotnet
+.emacs.d
 .lesshst
 .cache/
 .conda/
@@ -40,6 +43,7 @@
 *.so
 *.raw
 *.coverage
+
 
 **/__pycache__/
 **/.legacy/
