@@ -3,8 +3,11 @@ import ctypes
 import time
 import os
 import numpy as np
-# from .. import xp
-import cupy as xp
+
+try:
+    from .. import xp
+except:
+    import numpy as xp
 
 def set_backend(backend):
     global xp

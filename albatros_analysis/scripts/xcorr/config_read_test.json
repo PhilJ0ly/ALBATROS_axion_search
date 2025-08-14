@@ -8,17 +8,11 @@
         }
     },
     "correlation": {
-        "start_timestamp": 1721361671,
-        "end_timestamp": 1721361681,
-        "osamp": 64, 
-        "ipfb_acclen": 1024,
-        "cut": 10,
-        "nblock": 3,
-        
-        "pfb_size_multiplier": 8
+        "start_timestamp": 1721500041,
+        "end_timestamp": 1721500046
     },
     "frequency": {
-        "start_channel": 47, 
-        "end_channel": 48
+        "start_channel": 121, 
+        "end_channel": 122
     }
 }

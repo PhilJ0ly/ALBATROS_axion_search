@@ -1,11 +1,10 @@
-
-# Philippe Joly 2025-08-07
+# Philippe Joly 2025-08-14
 
 """ 
 GPU RePFB Stream 
 
 This script implements a RePFB algorithm to change the frequency resolution
-of ALBATROS telescope data with improved modularity and readability.
+of ALBATROS.
 """
 
 import sys
@@ -223,6 +222,26 @@ class MissingDataTracker:
         self.missing_count[ant_idx] = [info for info in self.missing_count[ant_idx] if info[1] > 0]
 
 
+class TimeStreamManager:
+    """Manages time stream output for IPFB-only processing"""
+    
+    def __init__(self, config: ProcessingConfig, total_samples: int):
+        self.config = config
+        # Initialize output arrays for time stream data
+        self.time_streams = np.zeros((config.nant, config.npol, total_samples), dtype='float32')
+        self.sample_idx = np.zeros((config.nant, config.npol), dtype=np.uint64)
+    
+    def add_chunk(self, ant_idx: int, pol_idx: int, processed_chunk: cp.ndarray):
+        """Add processed time stream chunk to output array"""
+        chunk_size = len(processed_chunk)
+        start_idx = self.sample_idx[ant_idx, pol_idx]
+        end_idx = start_idx + chunk_size
+        
+        # Convert to numpy and store
+        self.time_streams[ant_idx, pol_idx, start_idx:end_idx] = cp.asnumpy(processed_chunk)
+        self.sample_idx[ant_idx, pol_idx] = end_idx
+
+
 def plan_chunks(nchunks: int, lchunk: int, nblock: int, lblock: int, ntap: int) -> List[Tuple[int, Optional[int]]]:
     """
     Plan job chunks to efficiently use buffers.
@@ -296,29 +315,16 @@ def fill_pfb_buffer(ant_idx: int, pol_idx: int, subjobs: List, buffer_mgr: Buffe
     if buffer_full:
         return  # Buffer already full, nothing more to do
     
-    # Process each chunk for this antenna/polarization
     for chunk_idx, chunks in enumerate(subjobs):
         assert not buffer_full
         chunk = chunks[ant_idx]
         
-        # Track missing data (only for first polarization to avoid duplication)
+        # Track missing data (only for first pol to avoid duplication)
         if pol_idx == 0:
             pfb_blocks_affected = ((buffer_mgr.pfb_idx[ant_idx, pol_idx] + sizes.lchunk) // sizes.lblock) % config.nblock + 1
             missing_tracker.add_chunk_info(ant_idx, chunk, config.acclen, pfb_blocks_affected)
         
-        # Process chunk through inverse PFB
         buffer_full = ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnum)
-        
-        # Update edge data for next iteration
-        # pol_data = cp.empty((config.acclen + 2*config.cut, 2049), dtype='complex64', order='C')
-        # pol_data[2*config.cut:] = bdc.make_continuous_gpu(
-        #     chunk[f"pol{pol_idx}"], chunk['specnums'], start_specnum,
-        #     channels[slice(None)], config.acclen, nchans=2049
-        # )
-        # buffer_mgr.cut_pol[ant_idx, pol_idx, :, :] = pol_data[-2*config.cut:]
-        
-        # # Add processed chunk to buffer
-        # buffer_full = buffer_mgr.add_chunk_to_buffer(ant_idx, pol_idx, processed_chunk)
         
     
     # Calculate missing data average for this job
@@ -373,7 +379,6 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     )
     sizes = BufferSizes.from_config(config)
     
-    # Setup components
     antenna_objs, channels = setup_antenna_objects(idxs, files, config)
     cupy_win_big, filt = setup_filters_and_windows(config, cupy_win_big, filt)
     
@@ -385,11 +390,9 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     job_chunks = plan_chunks(nchunks, sizes.lchunk, nblock, sizes.lblock, config.ntap)
     missing_tracker = MissingDataTracker(nant, len(job_chunks))
     
-    # Setup frequency ranges
     repfb_chanstart = channels[config.chanstart] * osamp
     repfb_chanend = channels[config.chanend] * osamp
     
-    # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
     vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, len(job_chunks)), dtype="complex64", order="F")
     
@@ -399,7 +402,6 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     if verbose:
         _print_debug_info(config, sizes, buffer_mgr, len(job_chunks), nchunks)
     
-    # Main processing loop
     total_time = 0.0
     for job_idx, (chunk_start, chunk_end) in enumerate(job_chunks):
         start_time = time.perf_counter()
@@ -417,7 +419,6 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                 )
                 
     
-                # Generate PFB output for cross-correlation
                 output_start = ant_idx * config.npol + pol_idx # <-- still not sure
                 xin[output_start, :, :] = pu.cupy_pfb(
                     buffer_mgr.pfb_buf[ant_idx, pol_idx], 
@@ -426,7 +427,6 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
         
-        # Compute cross-correlations
         vis[:, :, :, job_idx] = cp.asnumpy(
             cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
         )
@@ -450,10 +450,102 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
 
 
 def get_time_stream(idxs: List[int], files: List[str], acclen: int, nchunks: int,
-                   chanstart: int, chanend: int, cut: int = 10, filt_thresh: float = 0.45, filt: Optional[cp.ndarray] = None, 
-                   verbose: bool = False):
-                   
-    return 1 # Placeholder for future implementation
+                   chanstart: int, chanend: int, cut: int = 10, filt_thresh: float = 0.45, 
+                   filt: Optional[cp.ndarray] = None, verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, cp.ndarray]:
+    """
+    Perform inverse PFB to generate time streams from baseband data.
+    
+    Args:
+        idxs: List of antenna indices
+        files: List of baseband files per antenna
+        acclen: Accumulation length in units of 4096-sample IPFB output blocks
+        nchunks: Total number of IPFB output chunks to process
+        chanstart, chanend: Frequency channel bounds
+        cut: Number of rows to cut from top and bottom of IPFB
+        filt_thresh: Regularization parameter for IPFB deconvolution filter
+        filt: Precomputed IPFB filter (optional)
+        verbose: Enable verbose logging
+    
+    Returns:
+        time_streams: Time stream data [nant, npol, nsamples]
+        missing_fraction: Fraction of missing data per chunk and antenna
+        filt: IPFB filter used
+    """
+    
+    nant = len(idxs)
+    config = ProcessingConfig(
+        acclen=acclen, pfb_size=0, nchunks=nchunks, nblock=0,  
+        chanstart=chanstart, chanend=chanend, osamp=1, nant=nant, cut=cut, filt_thresh=filt_thresh
+    )
+    
+    antenna_objs, channels = setup_antenna_objects(idxs, files, config)
+    _, filt = setup_filters_and_windows(config, None, filt)
+    
+    # Calculate total samples for output
+    total_samples = nchunks * (acclen - 2*cut) * 4096  # samples per chunk after cutting edges
+    
+    timestream_mgr = TimeStreamManager(config, total_samples)
+    missing_tracker = MissingDataTracker(nant, nchunks)
+    
+    pol_buffer = cp.empty((acclen + 2*cut, 2049), dtype='complex64', order='C')
+    cut_pol = cp.zeros((nant, 2, 2*cut, 2049), dtype='complex64', order='C')
+    
+    start_specnums = [ant.spec_num_start for ant in antenna_objs]
+    jobs = list(zip(*antenna_objs))
+    
+    if verbose:
+        print(f"Processing {nchunks} chunks for {nant} antennas")
+        print(f"Accumulation length: {acclen}, Cut: {cut}")
+        print(f"Total output samples per antenna/pol: {total_samples}")
+        print("Starting IPFB time stream processing...")
+    
+    total_time = 0.0
+    for chunk_idx, chunks in enumerate(jobs):
+        start_time = time.perf_counter()
+        
+        for ant_idx in range(nant):
+            chunk = chunks[ant_idx]
+            
+            # Track missing data
+            missing_pct = (1 - len(chunk["specnums"]) / acclen) * 100
+            missing_tracker.missing_count[ant_idx].append([missing_pct, 1])
+            missing_tracker.missing_fraction[ant_idx, chunk_idx] = missing_pct
+            
+            for pol_idx in range(2):  # npol = 2
+                pol_buffer[:2*cut] = cut_pol[ant_idx, pol_idx]
+                
+                pol_buffer[2*cut:] = bdc.make_continuous_gpu(
+                    chunk[f"pol{pol_idx}"],
+                    chunk['specnums'],
+                    start_specnums[ant_idx],
+                    channels[slice(None)],
+                    acclen,
+                    nchans=2049
+                )
+                
+                ipfb_result = pu.cupy_ipfb(pol_buffer, filt)
+                processed_chunk = ipfb_result[cut:-cut].ravel()
+                
+                timestream_mgr.add_chunk(ant_idx, pol_idx, processed_chunk)
+                
+                # Update edge data for next iteration
+                cut_pol[ant_idx, pol_idx, :, :] = pol_buffer[-2*cut:]
+        
+        end_time = time.perf_counter()
+        total_time += end_time - start_time
+        
+        if verbose and (chunk_idx % 1000 == 0 or chunk_idx == nchunks - 1):
+            print(f"Processed chunk {chunk_idx + 1}/{nchunks}, avg time {total_time/(chunk_idx + 1):.4f} s")
+    
+    if verbose:
+        print("=" * 50)
+        print(f"Completed {nchunks} chunks")
+        print(f"Average time per chunk: {total_time/nchunks:.4f} s")
+        print(f"Total processing time: {total_time:.2f} s")
+        print("=" * 50)
+    
+    return timestream_mgr.time_streams, missing_tracker.missing_fraction, filt
+
 
 def _print_debug_info(config: ProcessingConfig, sizes: BufferSizes, buffer_mgr: BufferManager, n_job_chunks: int, nchunks: int):
     """Print debug information if verbose mode is enabled"""
@@ -462,7 +554,3 @@ def _print_debug_info(config: ProcessingConfig, sizes: BufferSizes, buffer_mgr: 
     print(f"window shape: {buffer_mgr.pfb_buf.shape}")
     print(f"filter shape: Not shown")  # filt shape would need to be passed
     print(f"pol: {buffer_mgr.pol.shape}")
-    print(f"pfb_buf: {buffer_mgr.pfb_buf.shape}, rem_buf: {buffer_mgr.rem_buf.shape}")
-    print(f"chunky inputs: {nchunks}, {sizes.lchunk}, {config.nblock}, {sizes.lblock}, {config.ntap}")
-    print(f"starting {n_job_chunks} PFB Jobs over {nchunks} IPFB chunks...")
-    pu.print_mem("START ITER")

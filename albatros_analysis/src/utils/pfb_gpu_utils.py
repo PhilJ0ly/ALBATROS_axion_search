@@ -82,7 +82,7 @@ def cupy_ipfb_test(dat, filt):
     print(f"Final result shape: {res.shape}")
     return res
 
-def cupy_ipfb(dat,filt):
+def cupy_ipfb(dat,filt, complex_output=False):
 
     """On-device ipfb. Expects the data to be iPFB'd to live in GPU memory.
 
@@ -115,7 +115,12 @@ def cupy_ipfb(dat,filt):
 
     ddft=ddft*filt
 
-    res = pycufft.irfft(ddft, axis=1)
+    # No need for complex output for RePFB as the PFB will use rfft anyway
+    if complex_output:
+        res = pycufft.ifft(ddft, axis=1)
+    else:
+        res = pycufft.irfft(ddft, axis=1)
+
     res=res.T
     return res
 
@@ -131,7 +136,7 @@ def cupy_pfb_old(timestream, win, out=None, nchan=2049, ntap=4):
     out = pycufft.rfft(y,axis=1)
     return out
 
-def cupy_pfb(timestream, win, out=None, nchan=2049, ntap=4):
+def cupy_pfb(timestream, win, out=None, nchan=2049, ntap=4, complex_input=False):
     # A more memory efficient version
     lblock = 2*(nchan-1)
     nblock = timestream.size // lblock - (ntap - 1)
@@ -145,8 +150,13 @@ def cupy_pfb(timestream, win, out=None, nchan=2049, ntap=4):
     # Accumulate remaining taps in-place
     for i in range(1, ntap):
         y += timestream[i:nblock+i] * win[i]
-        
-    out = pycufft.rfft(y,axis=1)
+
+    # in RePFB we always use rfft, but in iPFB we can use complex FFT if the input is complex
+    if complex_input:
+        # If the input is complex, we need to use the complex FFT
+        out = pycufft.fft(y, axis=1)
+    else:   
+        out = pycufft.rfft(y,axis=1)
     return out
 
 def get_matft(nslice,nchan=2049,ntap=4):
