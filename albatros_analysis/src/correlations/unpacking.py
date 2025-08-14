@@ -3,7 +3,8 @@ import ctypes
 import time
 import os
 import numpy as np
-from .. import xp
+# from .. import xp
+import cupy as xp
 
 def set_backend(backend):
     global xp

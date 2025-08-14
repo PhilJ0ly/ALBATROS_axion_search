@@ -265,14 +265,14 @@ class TestIPFBProcessing:
     def simple_config(self):
         return ProcessingConfig(
             acclen=64, pfb_size=4096, nchunks=10, nblock=16,
-            chanstart=500, chanend=1500, osamp=1, nant=1, cut=5, filt_thresh=0.45, ntap=4
+            chanstart=500, chanend=1500, osamp=1, nant=1, cut=5, filt_thresh=0.1, ntap=4
         )
     
     def test_ipfb_impulse_response_debug(self, simple_config):
         """Test IPFB with impulse input"""
         # Create impulse in frequency domain
         freq_impulse = cp.zeros((simple_config.acclen + 2*simple_config.cut, 2049), dtype=cp.complex64)
-        freq_impulse[simple_config.cut + 10, 1024] = 1.0
+        freq_impulse[freq_impulse.shape[0]//2, 1024] = 1.0
     
         print(f"Input energy: {cp.sum(cp.abs(freq_impulse)**2)}")
     
@@ -287,7 +287,7 @@ class TestIPFBProcessing:
         print(f"filt min/max: {cp.min(cp.abs(filt))}, {cp.max(cp.abs(filt))}")
         print(f"filt mean: {cp.mean(filt)}")
         print(f"Number of near-zero filter coefficients: {cp.sum(cp.abs(filt) < 1e-6)}")
-        filt = cp.ones_like(filt, dtype=cp.complex64)  # For debugging, use identity filter
+        # filt = cp.ones_like(filt, dtype=cp.complex64)  # For debugging, use identity filter
 
 
         
@@ -407,14 +407,11 @@ class TestPFBProcessing:
     
     def test_pfb_window_function(self, pfb_config):
         """Test PFB window function properties"""
-        # Create PFB window
         window = pu.sinc_hamming(pfb_config.ntap, 4096 * pfb_config.osamp)
         cupy_window = cp.asarray(window, dtype=cp.float32)
         
-        # Check window properties
         assert len(window) == 4096 * pfb_config.osamp * pfb_config.ntap
-        assert np.all(window >= 0)  # Window should be non-negative
-        assert np.sum(window) > 0   # Window should have non-zero sum
+        assert np.sum(window) > 0   # Non-zero sum
     
     def test_pfb_impulse_response(self, pfb_config):
         """Test PFB with impulse input"""

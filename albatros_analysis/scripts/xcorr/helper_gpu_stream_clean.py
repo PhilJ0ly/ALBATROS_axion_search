@@ -107,13 +107,13 @@ class BufferManager:
             # handle overflow
             available_space = self.sizes.szblock - pfb_pos
             self._handle_buffer_overflow(ant_idx, pol_idx, available_space)
-            return True
         else:
             # add all remaining data
             self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:pfb_pos + rem_size] = self.rem_buf[ant_idx, pol_idx, :rem_size]
             self.pfb_idx[ant_idx, pol_idx] += rem_size
             self.rem_idx[ant_idx, pol_idx] = 0
-            return False
+        
+        return self.pfb_idx[ant_idx, pol_idx] == self.sizes.szblock
     
     def _handle_buffer_overflow(self, ant_idx: int, pol_idx: int, available_space: int):
         """Handles case where remaining buffer exceed available PFB buffer space"""
@@ -187,9 +187,11 @@ class IPFBProcessor:
             self.config.acclen,
             nchans=2049
         )
-        
+        # print("pol shape", self.buffers.pol.shape)
+        # raise ValueError
         # Apply inverse PFB and remove edge effects and add chunk to PFB buffer
-        return self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
+        buffer_full = self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
+        return buffer_full
 
 
 class MissingDataTracker:
@@ -324,11 +326,12 @@ def fill_pfb_buffer(ant_idx: int, pol_idx: int, subjobs: List, buffer_mgr: Buffe
         missing_tracker.calculate_job_average(ant_idx, job_idx)
     
     # Pad buffer if incomplete
-    if buffer_mgr.pfb_idx[ant_idx, pol_idx] != sizes.szblock:
+    if buffer_mgr.pfb_idx[ant_idx, pol_idx] != sizes.szblock or not buffer_full:
         if verbose:
-            print(f"Job {job_idx + 1} (Ant {ant_idx}, pol {pol_idx}): ")
-            print(f"Incomplete pfb_buffer with only {buffer_mgr.pfb_idx[ant_idx, pol_idx]} ")
-            print(f"instead of {sizes.szblock}")
+            pokjhgvcxcvbnm=1
+
+        print(f"Job {job_idx + 1} (Ant {ant_idx}, pol {pol_idx}): ")
+        print(f"Buffer Full: {buffer_full} with only {buffer_mgr.pfb_idx[ant_idx, pol_idx]} < {sizes.szblock}")\
 
         buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
 
@@ -376,6 +379,8 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     
     # Initialize managers
     buffer_mgr = BufferManager(config, sizes)
+    # print(buffer_mgr.pfb_buf.shape, "pfb_buf shape")
+    # raise ValueError
     ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, filt)
     job_chunks = plan_chunks(nchunks, sizes.lchunk, nblock, sizes.lblock, config.ntap)
     missing_tracker = MissingDataTracker(nant, len(job_chunks))
@@ -411,6 +416,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                     channels, config, sizes, verbose
                 )
                 
+    
                 # Generate PFB output for cross-correlation
                 output_start = ant_idx * config.npol + pol_idx # <-- still not sure
                 xin[output_start, :, :] = pu.cupy_pfb(

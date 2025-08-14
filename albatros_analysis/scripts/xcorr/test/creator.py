@@ -1,0 +1,434 @@
+import struct
+import numpy as np
+import time
+import os
+from datetime import datetime, timezone
+
+class BasebandTestFileGenerator:
+    def __init__(self, 
+                 unix_timestamp,
+                 output_folder="test_data",
+                 length_channels=120,     # Actual: 120 channels
+                 spectra_per_packet=5,    # Actual: 5 spectra per packet
+                 bit_mode=4,              # Actual: 4-bit
+                 have_trimble=1,
+                 channels=None,           # Actual: channels 64-183
+                 sample_rate=250e6,       # 250 Msamples/s
+                 bandwidth=125e6,         # Full bandwidth 0-125 MHz
+                 channel_start=64,        # Actual: starts at channel 64
+                 channel_end=183,         # Actual: ends at channel 183
+                 file_duration=34):       # 34 seconds per file
+        """
+        Generate test baseband files matching the actual data format.
+        
+        The actual data covers channels 64-183 (120 channels total),
+        which corresponds to approximately 4-11 MHz frequency range.
+        """
+        self.unix_timestamp = unix_timestamp
+        self.output_folder = output_folder
+        self.length_channels = length_channels
+        self.spectra_per_packet = spectra_per_packet
+        self.bit_mode = bit_mode
+        self.have_trimble = have_trimble
+        self.sample_rate = sample_rate
+        self.bandwidth = bandwidth
+        self.file_duration = file_duration
+        self.channel_start = channel_start
+        self.channel_end = channel_end
+        
+        # Calculate frequency parameters
+        self.freq_resolution = bandwidth / 2048  # Full resolution ~61 kHz
+        self.freq_start = channel_start * self.freq_resolution  # ~4 MHz
+        self.freq_end = (channel_end + 1) * self.freq_resolution  # ~11.5 MHz
+        self.actual_bandwidth = self.freq_end - self.freq_start  # ~7.5 MHz
+        
+        # Generate actual channels array (64 to 183) - FIXED: Include all 120 channels
+        if channels is None:
+            self.channels = np.arange(channel_start, channel_end + 1, dtype=np.uint64)
+        else:
+            self.channels = np.array(channels, dtype=np.uint64)
+        
+        # Verify we have the right number of channels
+        assert len(self.channels) == length_channels, f"Expected {length_channels} channels, got {len(self.channels)}"
+        
+        # Calculate packet parameters to match actual data
+        # Actual: 1204 bytes per packet = 4 bytes (spec_num) + 1200 bytes (data)
+        # 1200 bytes = 2400 samples (4-bit, 2 samples per byte)
+        # 2400 samples / 120 channels / 5 spectra = 4 samples per channel per spectrum
+        # This suggests 2 polarizations × 2 complex components = 4 samples per channel
+        self.bytes_per_packet = 1204  # Match actual data exactly
+        self.data_bytes_per_packet = 1200  # 1204 - 4 (for spec_num)
+        
+        # Calculate packets per file based on actual data
+        # Actual file has 415282 packets for 34 seconds  
+        self.packets_per_second = 415282 / 34  # ~12214 packets/sec
+        self.num_packets = int(self.packets_per_second * file_duration)
+        
+        # Calculate spectrum rate for realistic time evolution
+        self.spectrum_rate = self.packets_per_second * self.spectra_per_packet  # ~61k spectra/sec
+        
+        # GPS coordinates from actual data (Arctic location)
+        self.gps_latitude = 79.41560919999999
+        self.gps_longitude = -90.7723716
+        self.gps_elevation = 179.077
+        
+        print(f"Frequency range: {self.freq_start/1e6:.2f} - {self.freq_end/1e6:.2f} MHz")
+        print(f"Frequency resolution: {self.freq_resolution/1000:.1f} kHz per channel")
+        print(f"Actual bandwidth: {self.actual_bandwidth/1e6:.2f} MHz")
+        print(f"Channels: {self.channel_start} to {self.channel_end} ({len(self.channels)} channels)")
+        print(f"Packets per file: {self.num_packets}")
+        print(f"WARNING: Writing doubled channel data to compensate for reader bug in baseband_data_classes.py lines 89-91")
+
+    def get_frequency_array(self):
+        """Get frequency array in Hz for each channel."""
+        return self.channels * self.freq_resolution
+
+    def generate_realistic_pfb_spectra(self, packet_idx, spectrum_idx):
+        """
+        Generate realistic PFB frequency-domain spectra in the 4-11 MHz range.
+        
+        This creates frequency-domain data as would be produced by a Polyphase Filter Bank (PFB),
+        where each channel represents the complex amplitude at that frequency bin.
+        
+        Returns data for 120 frequency channels covering ~4-11 MHz.
+        Each channel contains complex spectral data (real + imaginary components).
+        """
+        # Time for this spectrum (for time-varying effects)
+        time_idx = packet_idx * self.spectra_per_packet + spectrum_idx
+        abs_time = time_idx / self.spectrum_rate  # Absolute time in seconds
+        
+        # Get frequency array for our channels
+        freqs = self.get_frequency_array()
+        
+        # Define test signals (sources) that appear in the frequency spectrum
+        test_sources = [
+            {"freq_mhz": 4.5, "power": 60, "width_khz": 10},      # Narrowband source
+            {"freq_mhz": 5.2, "power": 45, "width_khz": 15},      # 
+            {"freq_mhz": 6.8, "power": 40, "width_khz": 8},       # Sharp peak
+            {"freq_mhz": 7.3, "power": 55, "width_khz": 25},      # Wider source
+            {"freq_mhz": 8.9, "power": 35, "width_khz": 12},      #
+            {"freq_mhz": 10.2, "power": 50, "width_khz": 20},     # Stronger source
+            {"freq_mhz": 10.8, "power": 30, "width_khz": 6},      # Very narrow
+        ]
+        
+        # Add time-varying modulation (sources can vary in strength over time)
+        modulation_freq = 0.05  # Hz, very slow modulation
+        modulation = 1.0 + 0.3 * np.sin(2 * np.pi * modulation_freq * abs_time)
+        
+        # Faster modulation for some dynamics
+        fast_mod_freq = 2.0  # Hz  
+        fast_modulation = 1.0 + 0.1 * np.sin(2 * np.pi * fast_mod_freq * abs_time)
+        
+        # Initialize output arrays for PFB spectral data
+        pol0_real = np.zeros(self.length_channels, dtype=np.float32)
+        pol0_imag = np.zeros(self.length_channels, dtype=np.float32)
+        pol1_real = np.zeros(self.length_channels, dtype=np.float32)
+        pol1_imag = np.zeros(self.length_channels, dtype=np.float32)
+        
+        # Add noise floor (thermal noise in each frequency bin)
+        noise_level = 8  # Baseline noise power
+        np.random.seed(int((time_idx * 7919) % 2**31))  # Reproducible noise
+        
+        # Each frequency bin has independent thermal noise
+        pol0_real += np.random.normal(0, noise_level, self.length_channels)
+        pol0_imag += np.random.normal(0, noise_level, self.length_channels)
+        pol1_real += np.random.normal(0, noise_level, self.length_channels)
+        pol1_imag += np.random.normal(0, noise_level, self.length_channels)
+        
+        # Add each astronomical/RF source as spectral peaks
+        for source in test_sources:
+            center_freq_hz = source["freq_mhz"] * 1e6
+            source_width_hz = source["width_khz"] * 1000
+            
+            # Find center channel
+            center_channel = int(center_freq_hz / self.freq_resolution)
+            
+            # Calculate how many channels this source spans
+            width_channels = max(1, int(source_width_hz / self.freq_resolution))
+            
+            if self.channel_start <= center_channel <= self.channel_end:
+                center_idx = center_channel - self.channel_start
+                
+                # Create Gaussian-shaped spectral response for this source
+                for ch_offset in range(-width_channels//2, width_channels//2 + 1):
+                    ch_idx = center_idx + ch_offset
+                    if 0 <= ch_idx < self.length_channels:
+                        # Gaussian profile across frequency channels
+                        sigma = width_channels / 4.0  # Standard deviation
+                        gaussian_amp = np.exp(-(ch_offset**2) / (2 * sigma**2))
+                        
+                        # Apply time modulations
+                        base_power = source["power"] * gaussian_amp * modulation * fast_modulation
+                        
+                        # Add phase evolution (sources can have varying phases)
+                        phase_evolution = 2 * np.pi * abs_time * 0.1 + source.get("phase_offset", 0)
+                        
+                        # Complex spectral amplitude with realistic phase
+                        pol0_real[ch_idx] += base_power * np.cos(phase_evolution)
+                        pol0_imag[ch_idx] += base_power * np.sin(phase_evolution)
+                        
+                        # Add correlated signal to pol1 (astronomical sources are partially correlated)
+                        correlation = 0.75
+                        decorr_phase = phase_evolution + np.pi/3
+                        pol1_real[ch_idx] += base_power * correlation * np.cos(decorr_phase)
+                        pol1_imag[ch_idx] += base_power * correlation * np.sin(decorr_phase)
+                        
+                        # Add uncorrelated component (system noise, etc.)
+                        uncorr_power = base_power * (1 - correlation)
+                        uncorr_phase = phase_evolution + np.pi
+                        pol1_real[ch_idx] += uncorr_power * np.cos(uncorr_phase)
+                        pol1_imag[ch_idx] += uncorr_power * np.sin(uncorr_phase)
+        
+        # Add broadband spectral features (e.g., from receiver gain variations)
+        freq_response = 1.0 + 0.1 * np.sin(np.linspace(0, 4*np.pi, self.length_channels))  # Gain ripple
+        pol0_real *= freq_response
+        pol0_imag *= freq_response * 0.95  # Slight I/Q imbalance
+        pol1_real *= freq_response * 0.98
+        pol1_imag *= freq_response * 0.97
+        
+        # Occasionally add RFI (sharp spectral features)
+        if np.random.random() < 0.03:  # 3% chance of RFI per spectrum
+            rfi_freq = np.random.uniform(4.2e6, 10.8e6)  # RFI in our band
+            rfi_channel = int(rfi_freq / self.freq_resolution)
+            
+            if self.channel_start <= rfi_channel <= self.channel_end:
+                rfi_idx = rfi_channel - self.channel_start
+                rfi_width = np.random.randint(1, 5)  # 1-5 channels wide
+                rfi_power = np.random.uniform(80, 150)  # Strong RFI
+                
+                # RFI appears as sharp spectral peak(s)
+                start_idx = max(0, rfi_idx - rfi_width//2)
+                end_idx = min(self.length_channels, rfi_idx + rfi_width//2 + 1)
+                
+                # RFI typically has strong, coherent signal
+                rfi_phase = np.random.uniform(0, 2*np.pi)
+                pol0_real[start_idx:end_idx] += rfi_power * np.cos(rfi_phase)
+                pol0_imag[start_idx:end_idx] += rfi_power * np.sin(rfi_phase) * 0.8
+                pol1_real[start_idx:end_idx] += rfi_power * 0.95 * np.cos(rfi_phase + 0.1)
+                pol1_imag[start_idx:end_idx] += rfi_power * 0.9 * np.sin(rfi_phase + 0.1)
+        
+        # Convert to unsigned 8-bit range for 4-bit packing
+        offset = 128
+        scale = 1.8
+        
+        pol0_real_u8 = np.clip(pol0_real * scale + offset, 0, 255).astype(np.uint8)
+        pol0_imag_u8 = np.clip(pol0_imag * scale + offset, 0, 255).astype(np.uint8)
+        pol1_real_u8 = np.clip(pol1_real * scale + offset, 0, 255).astype(np.uint8)
+        pol1_imag_u8 = np.clip(pol1_imag * scale + offset, 0, 255).astype(np.uint8)
+        
+        return (pol0_real_u8, pol0_imag_u8, pol1_real_u8, pol1_imag_u8)
+
+    def pack_data_4bit_actual_format_complex(self, pol0_real, pol0_imag, pol1_real, pol1_imag):
+        """
+        Pack complex data to match actual format based on unpacking code analysis.
+        
+        From the C code unpack_4bit_float:
+        - Each channel has 2 bytes: pol0_byte, pol1_byte  
+        - Each byte has: upper 4 bits = real, lower 4 bits = imag
+        - Data layout: [pol0_ch0][pol1_ch0][pol0_ch1][pol1_ch1]...
+        - Values are signed 4-bit (-8 to +7)
+        
+        For 120 channels × 5 spectra = 600 channel-spectra per packet
+        600 × 2 bytes = 1200 bytes per packet ✓
+        """
+        # Convert float data to signed 4-bit values (-8 to +7)
+        # First convert to signed range around 0
+        pol0_real_centered = pol0_real.astype(np.int16) - 128  # -128 to +127
+        pol0_imag_centered = pol0_imag.astype(np.int16) - 128
+        pol1_real_centered = pol1_real.astype(np.int16) - 128
+        pol1_imag_centered = pol1_imag.astype(np.int16) - 128
+        
+        # Scale to 4-bit signed range (-8 to +7)
+        pol0_real_4bit = np.clip(pol0_real_centered // 8, -8, 7).astype(np.int8)
+        pol0_imag_4bit = np.clip(pol0_imag_centered // 8, -8, 7).astype(np.int8)
+        pol1_real_4bit = np.clip(pol1_real_centered // 8, -8, 7).astype(np.int8)
+        pol1_imag_4bit = np.clip(pol1_imag_centered // 8, -8, 7).astype(np.int8)
+        
+        # Convert signed to unsigned 4-bit for packing (0-15 range)
+        # This matches what the unpacking code expects: if (value > 8) value -= 16
+        pol0_real_u4 = ((pol0_real_4bit + 16) % 16).astype(np.uint8)
+        pol0_imag_u4 = ((pol0_imag_4bit + 16) % 16).astype(np.uint8)
+        pol1_real_u4 = ((pol1_real_4bit + 16) % 16).astype(np.uint8)
+        pol1_imag_u4 = ((pol1_imag_4bit + 16) % 16).astype(np.uint8)
+        
+        # Pack each polarization: [real nibble][imag nibble] in each byte
+        pol0_bytes = (pol0_real_u4 << 4) | pol0_imag_u4  # Upper 4 bits real, lower 4 bits imag
+        pol1_bytes = (pol1_real_u4 << 4) | pol1_imag_u4
+        
+        # Interleave pol0 and pol1 bytes: pol0_ch0, pol1_ch0, pol0_ch1, pol1_ch1, ...
+        # This matches the unpacking: data[(i+rowstart)*c1 + 2*k] for pol0, data[...+2*k+1] for pol1
+        packed_bytes = np.zeros(self.length_channels * 2, dtype=np.uint8)
+        packed_bytes[0::2] = pol0_bytes  # Even indices: pol0
+        packed_bytes[1::2] = pol1_bytes  # Odd indices: pol1
+        
+        return packed_bytes
+
+    def write_header(self, file_obj):
+        """Write file header matching actual format."""
+        # CRITICAL FIX: The reader code has a bug in lines 89-91 of baseband_data_classes.py:
+        # if self.bit_mode == 4:
+        #     self.channels = self.channels[::2]  # Takes every other channel!
+        #     self.length_channels = int(self.length_channels / 2)  # Halves count!
+        #
+        # To compensate for this bug, we need to write DOUBLE the channels (240) 
+        # and double the length_channels (240) so that after the buggy reader 
+        # processes it, we get the correct 120 channels.
+        
+        # Create expanded channels array to compensate for reader bug
+        # We need every channel to appear twice so that [::2] gives us what we want
+        expanded_channels = []
+        for channel in self.channels:
+            expanded_channels.extend([channel, channel])  # Duplicate each channel
+        expanded_channels = np.array(expanded_channels, dtype=np.uint64)
+        
+        channels_bytes = len(expanded_channels) * 8  # 240 channels × 8 bytes = 1920 bytes
+        gps_and_padding_bytes = 5 * 8  # GPS week, timestamp, lat, lon, elev = 5*8 = 40 bytes
+        header_fields_bytes = 5 * 8  # bytes_per_packet, length_channels, spectra_per_packet, bit_mode, have_trimble = 5*8 = 40 bytes
+        
+        # Calculate header size to match actual file (2008 bytes total)
+        header_size_field = 2000  # This makes total header = 8 + 2000 = 2008 bytes
+        
+        # Write header size (first 8 bytes)
+        file_obj.write(struct.pack(">Q", header_size_field))
+        
+        # Write packet parameters - CRITICAL: Write 240 for length_channels to compensate for reader bug
+        file_obj.write(struct.pack(">Q", self.bytes_per_packet))  # 1204
+        file_obj.write(struct.pack(">Q", self.length_channels * 2))   # 240 (will become 120 after reader bug)
+        file_obj.write(struct.pack(">Q", self.spectra_per_packet)) # 5
+        file_obj.write(struct.pack(">Q", self.bit_mode))          # 4
+        file_obj.write(struct.pack(">Q", self.have_trimble))      # 1
+        
+        # Write expanded channels array - each channel duplicated to compensate for [::2] bug
+        for channel in expanded_channels:
+            file_obj.write(struct.pack(">Q", channel))
+        
+        # GPS data (actual coordinates from real data)
+        file_obj.write(struct.pack(">Q", 0))  # GPS week = 0 (as in actual data)
+        file_obj.write(struct.pack(">Q", self.unix_timestamp))  # GPS timestamp
+        file_obj.write(struct.pack(">d", self.gps_latitude))    # Arctic latitude
+        file_obj.write(struct.pack(">d", self.gps_longitude))   # Arctic longitude
+        file_obj.write(struct.pack(">d", self.gps_elevation))   # Arctic elevation
+        
+        # Calculate padding needed to reach 2008 total bytes
+        bytes_written = 8 + header_fields_bytes + channels_bytes + gps_and_padding_bytes  
+        padding_needed = 2008 - bytes_written
+        if padding_needed > 0:
+            file_obj.write(b'\x00' * padding_needed)
+        elif padding_needed < 0:
+            print(f"Warning: Header too large by {-padding_needed} bytes!")
+
+    def generate_file(self, timestamp):
+        """Generate a single test file for given timestamp."""
+        # Create folder structure (e.g., "17214" from timestamp)
+        folder_prefix = str(timestamp)[:5]
+        full_folder = os.path.join(self.output_folder, folder_prefix)
+        os.makedirs(full_folder, exist_ok=True)
+        
+        filename = f"{timestamp}.raw"
+        filepath = os.path.join(full_folder, filename)
+        
+        print(f"Generating {filepath}...")
+        print(f"  Packets: {self.num_packets}, Spectra per packet: {self.spectra_per_packet}")
+        print(f"  Bytes per packet: {self.bytes_per_packet}")
+        
+        with open(filepath, 'wb') as f:
+            # Write header (2008 bytes total)
+            self.write_header(f)
+            
+            # Calculate starting spectrum number
+            start_spec_num = int((timestamp % 100000) * 100)
+            
+            # Write packet data
+            for packet_idx in range(self.num_packets):
+                spec_num = start_spec_num + packet_idx * self.spectra_per_packet
+                
+                # Generate data for all spectra in this packet
+                packet_data = []
+                
+                for spectrum_idx in range(self.spectra_per_packet):
+                    pol0_real, pol0_imag, pol1_real, pol1_imag = self.generate_realistic_pfb_spectra(packet_idx, spectrum_idx)
+                    packed = self.pack_data_4bit_actual_format_complex(pol0_real, pol0_imag, pol1_real, pol1_imag)
+                    packet_data.append(packed)
+                
+                # Combine all spectra data (should be 1200 bytes total)
+                spectra_data = np.concatenate(packet_data)
+                
+                # Verify size matches expected format
+                expected_data_size = self.data_bytes_per_packet
+                if len(spectra_data) != expected_data_size:
+                    print(f"Warning: data size {len(spectra_data)} != expected {expected_data_size}")
+                
+                # Write packet: spec_num (4 bytes) + spectra data (1200 bytes)
+                f.write(struct.pack(">I", spec_num))
+                f.write(spectra_data.tobytes())
+                
+                if packet_idx % 10000 == 0:
+                    print(f"    Generated {packet_idx+1}/{self.num_packets} packets")
+        
+        print(f"Successfully generated {filepath}")
+        file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+        print(f"File size: {file_size_mb:.1f} MB")
+        return filepath
+
+def generate_actual_format_test_files(start_timestamp=1721400005, 
+                                     num_files=3,
+                                     output_folder="test_baseband_data"):
+    """
+    Generate test files matching the actual data format exactly.
+    
+    Based on real header:
+    - 120 channels (64-183)
+    - ~4-11 MHz frequency range  
+    - 5 spectra per packet
+    - 1204 bytes per packet
+    - 4-bit mode
+    """
+    print(f"Generating {num_files} test files matching ACTUAL data format...")
+    print("Real specs: 120 channels (64-183), ~4-11 MHz, 5 spectra/packet, 1204 bytes/packet")
+    
+    generator = BasebandTestFileGenerator(
+        start_timestamp, 
+        output_folder=output_folder,
+        file_duration=34
+    )
+    
+    generated_files = []
+    current_timestamp = start_timestamp
+    
+    for i in range(num_files):
+        filepath = generator.generate_file(current_timestamp)
+        generated_files.append(filepath)
+        
+        # Next file is 34 seconds later
+        current_timestamp += 34
+        print(f"Completed {i+1}/{num_files} files")
+    
+    print(f"\nGenerated {num_files} test files:")
+    for filepath in generated_files:
+        print(f"  {filepath}")
+    
+    return generated_files
+
+if __name__ == "__main__":
+    print("Generating test files matching ACTUAL baseband data format...")
+    print("Channels 64-183 (120 total), ~4-11 MHz, 5 spectra/packet, 1204 bytes/packet")
+    
+    # Generate test files with actual format
+    files = generate_actual_format_test_files(
+        start_timestamp=1721400005,
+        num_files=1,
+        output_folder="/scratch/philj0ly/test_baseband_data"
+    )
+    
+    print(f"\nTest files ready! Test with your reader:")
+    print(f"from your_module import get_header, BasebandFloat")
+    print(f"header = get_header('{files[0]}', verbose=True)")
+    print(f"bb = BasebandFloat('{files[0]}', readlen=50)")
+    print(f"print('Data shapes:', bb.pol0.shape, bb.pol1.shape)")
+    
+    print(f"\nSignal content (PFB frequency-domain spectra):")
+    print(f"- Spectral peaks at: 4.5, 5.2, 6.8, 7.3, 8.9, 10.2, 10.8 MHz")
+    print(f"- Thermal noise floor in each frequency bin")
+    print(f"- Receiver gain ripple across frequency")
+    print(f"- Occasional narrowband RFI")
+    print(f"- Time-varying source amplitudes")

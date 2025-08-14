@@ -54,9 +54,10 @@ def compute_filter(matft, thresh):
         
     return filt  
 
-def cupy_ipfb(dat, filt):
+def cupy_ipfb_test(dat, filt):
     print(f"Input dat shape: {dat.shape}")
     print(f"Filter shape: {filt.shape}")
+    
     
     dd = pycufft.irfft(dat, axis=1)
     print(f"After first IRFFT: {dd.shape}")
@@ -81,7 +82,7 @@ def cupy_ipfb(dat, filt):
     print(f"Final result shape: {res.shape}")
     return res
 
-def cupy_ipfb_true(dat,filt):
+def cupy_ipfb(dat,filt):
 
     """On-device ipfb. Expects the data to be iPFB'd to live in GPU memory.
 

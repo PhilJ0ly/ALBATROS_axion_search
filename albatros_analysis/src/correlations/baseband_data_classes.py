@@ -2,15 +2,16 @@ import struct
 import time
 import numba as nb
 import numpy as np
-from .. import xp
+# from .. import xp
+import cupy as xp
 import os
 
 print("BDC is using", xp.__name__)
 
-if __name__ == "__main__":
-    import unpacking as unpk  # If loaded as top level script
-else:
-    from . import unpacking as unpk  # If loaded as a module
+# if __name__ == "__main__":
+import unpacking as unpk  # If loaded as top level script
+# else:
+#     from . import unpacking as unpk  # If loaded as a module
 
 @nb.njit(parallel=True)
 def fill_arr_cpu(specnum, spec_per_packet):

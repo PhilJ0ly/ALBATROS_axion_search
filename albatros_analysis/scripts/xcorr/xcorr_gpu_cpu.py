@@ -84,6 +84,7 @@ if __name__=="__main__":
 
     nchunks = int(np.floor((end_t-init_t)*250e6/4096/acclen))
     idxs, files = helper.get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents)
+    
     print("final idxs", idxs)
     print("nchunks", nchunks)
     print("IPFB ROWS", pfb_size)
