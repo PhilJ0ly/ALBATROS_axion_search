@@ -8,6 +8,8 @@ This script implements a RePFB algorithm to change the frequency resolution
 of ALBATROS telescope data with improved modularity and readability.
 """
 
+# this version uses while loop instead of a job planner.
+
 import sys
 from os import path
 sys.path.insert(0, path.expanduser("~"))
@@ -58,6 +60,7 @@ class BufferSizes:
     szblock: int  # Size of streaming block buffer
     lchunk: int  # Length of time stream chunk after IPFB
     nchan: int  # Number of channels after oversampling
+    num_of_pfbs: int  # Number of PFBs to process in total
     
     @classmethod
     def from_config(cls, config: ProcessingConfig) -> 'BufferSizes':
@@ -65,7 +68,8 @@ class BufferSizes:
         szblock = int((config.nblock + (config.ntap - 1)) * lblock)
         lchunk = 4096 * config.acclen
         nchan = (config.chanend - config.chanstart) * config.osamp
-        return cls(lblock, szblock, lchunk, nchan)
+        num_of_pfbs = int(np.ceil(lchunk*config.nchunks/((config.ntap-1)*lblock)))
+        return cls(lblock, szblock, lchunk, nchan, num_of_pfbs)
 
 
 class BufferManager:
@@ -87,13 +91,9 @@ class BufferManager:
     
     def reset_overlap_region(self):
         """Set up overlap region for continuity between iterations"""
-        if hasattr(self, '_first_iteration') and not self._first_iteration:
-            # Keep overlap from previous iteration
-            ntap = self.config.ntap
-            self.pfb_buf[:, :, :ntap-1, :] = self.pfb_buf[:, :, -(ntap-1):, :]
-            self.pfb_idx[:, :] = (ntap - 1) * self.sizes.lblock
-        else:
-            self._first_iteration = False
+        ntap = self.config.ntap
+        self.pfb_buf[:, :, :ntap-1, :] = self.pfb_buf[:, :, -(ntap-1):, :]
+        self.pfb_idx[:, :] = (ntap - 1) * self.sizes.lblock
     
     def add_remaining_to_pfb_buffer(self, ant_idx: int, pol_idx: int) -> bool:
         """
@@ -129,7 +129,7 @@ class BufferManager:
         self.rem_idx[ant_idx, pol_idx] = overflow_size
         self.pfb_idx[ant_idx, pol_idx] = self.sizes.szblock
     
-    def add_chunk_to_buffer(self, ant_idx: int, pol_idx: int, processed_chunk: cp.ndarray) -> bool:
+    def add_chunk_to_buffer(self, ant_idx: int, pol_idx: int, processed_chunk: cp.ndarray):
         """
         Add processed chunk to buffers.
         Returns True if PFB buffer is full.
@@ -149,19 +149,18 @@ class BufferManager:
             self.rem_buf[ant_idx, pol_idx, :overflow_size] = processed_chunk[available_space:]
             self.rem_idx[ant_idx, pol_idx] = overflow_size
             self.pfb_idx[ant_idx, pol_idx] = self.sizes.szblock
-            return True
         else:
             # Normal case
             self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:final_pos] = processed_chunk
             self.pfb_idx[ant_idx, pol_idx] = final_pos
-            return final_pos == self.sizes.szblock
+
     
     def pad_incomplete_buffer(self, ant_idx: int, pol_idx: int):
         """Pad incomplete PFB buffer with zeros"""
 
-        current_pos = self.pfb_idx[ant_idx, pol_idx]
+        current_pos = self.pfb_idx[0, 0]
         if current_pos < self.sizes.szblock:
-            self.pfb_buf[ant_idx, pol_idx].flat[current_pos:] = 0.0
+            self.pfb_buf[:, :].flat[current_pos:] = 0.0
 
 class IPFBProcessor:
     """Handles IPFB processing of chunks to time stream"""
@@ -172,7 +171,7 @@ class IPFBProcessor:
         self.filt = filt
         self.buffers = buffer_mgr
     
-    def process_chunk(self, chunk: dict, ant_idx: int, pol_idx: int, start_specnum: int) -> bool:
+    def process_chunk(self, chunk: dict, ant_idx: int, pol_idx: int, start_specnum: int):
         """Process a single chunk through inverse PFB"""
         # Prepare polarization data with edge handling
         # pol_data = cp.empty((self.config.acclen + 2*self.config.cut, 2049), dtype='complex64', order='C')
@@ -190,8 +189,8 @@ class IPFBProcessor:
         # print("pol shape", self.buffers.pol.shape)
         # raise ValueError
         # Apply inverse PFB and remove edge effects and add chunk to PFB buffer
-        buffer_full = self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
-        return buffer_full
+        self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
+        
 
 
 class MissingDataTracker:
@@ -223,37 +222,6 @@ class MissingDataTracker:
         self.missing_count[ant_idx] = [info for info in self.missing_count[ant_idx] if info[1] > 0]
 
 
-def plan_chunks(nchunks: int, lchunk: int, nblock: int, lblock: int, ntap: int) -> List[Tuple[int, Optional[int]]]:
-    """
-    Plan job chunks to efficiently use buffers.
-    Returns list of (start_chunk, end_chunk) tuples.
-    """
-    ranges = []
-    stride_size = nblock * lblock
-    overlap_size = (ntap - 1) * lblock
-    total_needed = stride_size + overlap_size
-    
-    remainder = 0
-    cur_chunk = 0
-    
-    while cur_chunk < nchunks:
-        start_chunk = cur_chunk
-        
-        # Accumulate chunks until we have enough samples
-        while remainder < total_needed and cur_chunk < nchunks:
-            remainder += lchunk
-            cur_chunk += 1
-        
-        if remainder >= total_needed:
-            ranges.append((start_chunk, cur_chunk))
-            remainder -= stride_size
-        else:
-            # Handle final incomplete chunk
-            if remainder > 0:
-                ranges.append((start_chunk, cur_chunk))
-            break
-    
-    return ranges
 
 
 def setup_antenna_objects(idxs: List[int], files: List[str], config: ProcessingConfig) -> Tuple[List, np.ndarray]:
@@ -282,58 +250,6 @@ def setup_filters_and_windows(config: ProcessingConfig, cupy_win_big: Optional[c
         filt = pu.calculate_filter(matft, config.filt_thresh)
     
     return cupy_win_big, filt
-
-
-def fill_pfb_buffer(ant_idx: int, pol_idx: int, subjobs: List, buffer_mgr: BufferManager,
-                        ipfb_processor: IPFBProcessor, missing_tracker: MissingDataTracker,
-                        job_idx: int, start_specnum: int, channels: np.ndarray, 
-                        config: ProcessingConfig, sizes: BufferSizes, verbose: bool):
-    """Process a single antenna/polarization combination"""
-    
-    # Handle any remaining data from previous iteration
-    buffer_full = buffer_mgr.add_remaining_to_pfb_buffer(ant_idx, pol_idx)
-    
-    if buffer_full:
-        return  # Buffer already full, nothing more to do
-    
-    # Process each chunk for this antenna/polarization
-    for chunk_idx, chunks in enumerate(subjobs):
-        assert not buffer_full
-        chunk = chunks[ant_idx]
-        
-        # Track missing data (only for first polarization to avoid duplication)
-        if pol_idx == 0:
-            pfb_blocks_affected = ((buffer_mgr.pfb_idx[ant_idx, pol_idx] + sizes.lchunk) // sizes.lblock) % config.nblock + 1
-            missing_tracker.add_chunk_info(ant_idx, chunk, config.acclen, pfb_blocks_affected)
-        
-        # Process chunk through inverse PFB
-        buffer_full = ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnum)
-        
-        # Update edge data for next iteration
-        # pol_data = cp.empty((config.acclen + 2*config.cut, 2049), dtype='complex64', order='C')
-        # pol_data[2*config.cut:] = bdc.make_continuous_gpu(
-        #     chunk[f"pol{pol_idx}"], chunk['specnums'], start_specnum,
-        #     channels[slice(None)], config.acclen, nchans=2049
-        # )
-        # buffer_mgr.cut_pol[ant_idx, pol_idx, :, :] = pol_data[-2*config.cut:]
-        
-        # # Add processed chunk to buffer
-        # buffer_full = buffer_mgr.add_chunk_to_buffer(ant_idx, pol_idx, processed_chunk)
-        
-    
-    # Calculate missing data average for this job
-    if pol_idx == 0:
-        missing_tracker.calculate_job_average(ant_idx, job_idx)
-    
-    # Pad buffer if incomplete
-    if buffer_mgr.pfb_idx[ant_idx, pol_idx] != sizes.szblock or not buffer_full:
-        if verbose:
-            pokjhgvcxcvbnm=1
-
-        print(f"Job {job_idx + 1} (Ant {ant_idx}, pol {pol_idx}): ")
-        print(f"Buffer Full: {buffer_full} with only {buffer_mgr.pfb_idx[ant_idx, pol_idx]} < {sizes.szblock}")\
-
-        buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
 
 
 def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int, nblock: int, 
@@ -379,46 +295,81 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     
     # Initialize managers
     buffer_mgr = BufferManager(config, sizes)
-    # print(buffer_mgr.pfb_buf.shape, "pfb_buf shape")
-    # raise ValueError
     ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, filt)
-    job_chunks = plan_chunks(nchunks, sizes.lchunk, nblock, sizes.lblock, config.ntap)
-    missing_tracker = MissingDataTracker(nant, len(job_chunks))
+    missing_tracker = MissingDataTracker(nant, sizes.num_of_pfbs)
     
     # Setup frequency ranges
     repfb_chanstart = channels[config.chanstart] * osamp
     repfb_chanend = channels[config.chanend] * osamp
+
+    
     
     # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
-    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, len(job_chunks)), dtype="complex64", order="F")
+    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
     
     start_specnums = [ant.spec_num_start for ant in antenna_objs]
-    jobs = list(zip(*antenna_objs)) # <- got to fix this. we are loading all antennas at once, so this is a list of tuples
     
     if verbose:
-        _print_debug_info(config, sizes, buffer_mgr, len(job_chunks), nchunks)
+        _print_debug_info(config, sizes, buffer_mgr, sizes.num_of_pfbs, nchunks)
     
-    # Main processing loop
-    total_time = 0.0
+    job_idx = 0
 
-    for job_idx, (chunk_start, chunk_end) in enumerate(job_chunks):
-        start_time = time.perf_counter()
-        
-        buffer_mgr.reset_overlap_region()
-        subjobs = jobs[chunk_start:chunk_end] if chunk_end is not None else jobs[chunk_start:] # check if this is right
-        
-        # Process each antenna and polarization
+    for i, chunks in enumerate(zip(*antenna_objs)):
+        pfbed = False
+
         for ant_idx in range(config.nant):
+            chunk = chunks[ant_idx]
+
+            pfb_blocks_affected = ((buffer_mgr.pfb_idx[ant_idx, 0] + sizes.lchunk) // sizes.lblock) % config.nblock + 1
+            missing_tracker.add_chunk_info(ant_idx, chunk, config.acclen, pfb_blocks_affected)
+
             for pol_idx in range(config.npol):
-                fill_pfb_buffer(
-                    ant_idx, pol_idx, subjobs, buffer_mgr, ipfb_processor,
-                    missing_tracker, job_idx, start_specnums[ant_idx], 
-                    channels, config, sizes, verbose
-                )
+                ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnums[ant_idx])
                 
     
-                # Generate PFB output for cross-correlation
+        # All PFB idices should be the same after processing all antennas
+        assert (buffer_mgr.pfb_idx == buffer_mgr.pfb_idx[0,0]).all()
+
+        # We know that all antennas/pols have the same PFB index after processing so is sufficient to check one
+        if buffer_mgr.pfb_idx[0,0] == sizes.szblock:
+            pfbed = True
+            # Generate PFB output for cross-correlation
+            for ant_idx in range(config.nant):
+                
+                missing_tracker.calculate_job_average(ant_idx, job_idx)
+
+                for pol_idx in range(config.npol):
+                    output_start = ant_idx * config.npol + pol_idx # <-- still not sure
+                    xin[output_start, :, :] = pu.cupy_pfb(
+                        buffer_mgr.pfb_buf[ant_idx, pol_idx], 
+                        cupy_win_big,
+                        nchan=2048 * osamp + 1, 
+                        ntap=4
+                    )[:, repfb_chanstart:repfb_chanend]
+
+            vis[:, :, :, job_idx] = cp.asnumpy(
+                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+            )
+            buffer_mgr.reset_overlap_region()
+            job_idx += 1
+
+        
+        if verbose and job_idx % 100 == 0:
+            print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} s")
+     # Pad buffer if incomplete
+
+    if not pfbed:
+
+        print(f"Job {job_idx + 1}: ")
+        print(f"Buffer not Full with only {buffer_mgr.pfb_idx[0,0]} < {sizes.szblock}")
+        buffer_mgr.pad_incomplete_buffer()
+
+        for ant_idx in range(config.nant):
+                
+            missing_tracker.calculate_job_average(ant_idx, job_idx)
+
+            for pol_idx in range(config.npol):
                 output_start = ant_idx * config.npol + pol_idx # <-- still not sure
                 xin[output_start, :, :] = pu.cupy_pfb(
                     buffer_mgr.pfb_buf[ant_idx, pol_idx], 
@@ -426,22 +377,10 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                     nchan=2048 * osamp + 1, 
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
-        
-        # Compute cross-correlations
-        vis[:, :, :, job_idx] = cp.asnumpy(
-            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
-        )
-        
-        end_time = time.perf_counter() # THis is not how to measure GPU time, but it is fine for now
-        total_time += end_time - start_time
-        
-        if verbose and job_idx % 100 == 0:
-            print(f"Job Chunk {job_idx + 1}/{len(job_chunks)}, avg time {total_time/(job_idx + 1):.4f} s")
     
     if verbose:
         print("=" * 30)
-        print(f"Completed {len(job_chunks)}/{len(job_chunks)} Job Chunks")
-        print(f"avg time per job: {total_time/len(job_chunks):.4f} s")
+        print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
         print("=" * 30)
     
     vis = np.ma.masked_invalid(vis)
@@ -449,12 +388,6 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     
     return vis, missing_tracker.missing_fraction, freqs, cupy_win_big, filt
 
-
-def get_time_stream(idxs: List[int], files: List[str], acclen: int, nchunks: int,
-                   chanstart: int, chanend: int, cut: int = 10, filt_thresh: float = 0.45, filt: Optional[cp.ndarray] = None, 
-                   verbose: bool = False):
-                   
-    return 1 # Placeholder for future implementation
 
 def _print_debug_info(config: ProcessingConfig, sizes: BufferSizes, buffer_mgr: BufferManager, n_job_chunks: int, nchunks: int):
     """Print debug information if verbose mode is enabled"""

@@ -9,7 +9,7 @@
     },
     "correlation": {
         "start_timestamp": 1721361671,
-        "end_timestamp": 1721361681,
+        "end_timestamp": 1721361701,
         "osamp": 64, 
         "ipfb_acclen": 1024,
         "cut": 10,

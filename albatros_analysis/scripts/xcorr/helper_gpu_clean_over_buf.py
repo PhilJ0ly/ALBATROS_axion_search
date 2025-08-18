@@ -1,5 +1,5 @@
 
-# Philippe Joly 2025-08-07
+# Philippe Joly 2025-08-18
 
 """ 
 GPU RePFB Stream 
@@ -7,6 +7,10 @@ GPU RePFB Stream
 This script implements a RePFB algorithm to change the frequency resolution
 of ALBATROS telescope data with improved modularity and readability.
 """
+
+# This version reduces the szie of pfb buffer to only keep 1 instead of nant*npol buffers.
+# keeping only nant*npol X (ntap-1)*lblock overlap buffers.
+# It loads chunks job by job and processes them in a streaming fashion.
 
 import sys
 from os import path
@@ -19,6 +23,7 @@ import numpy as np
 import time
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
+from itertools import islice
 import ctypes
 lib = ctypes.CDLL('./libcgemm_batch.so')
 
@@ -78,22 +83,24 @@ class BufferManager:
         # Initialize buffers
         self.pol = cp.empty((config.acclen + 2*config.cut, 2049), dtype='complex64', order='C')
         self.cut_pol = cp.zeros((config.nant, config.npol, 2*config.cut, 2049), dtype='complex64', order='C')
-        self.pfb_buf = cp.zeros((config.nant, config.npol, config.nblock + (config.ntap-1), sizes.lblock),dtype='float32', order='C')
+        self.pfb_buf = cp.zeros((config.nblock + (config.ntap-1), sizes.lblock),dtype='float32', order='C')
+        self.overlap_buf = cp.zeros((config.nant, config.npol, config.ntap-1, sizes.lblock),dtype='float32', order='C')
         self.rem_buf = cp.empty((config.nant, config.npol, sizes.lchunk), dtype='float32', order='C')
         
         # Buffer indices
         self.rem_idx = np.zeros((config.nant, config.npol), dtype=np.uint64)
         self.pfb_idx = np.zeros((config.nant, config.npol), dtype=np.uint64)
     
-    def reset_overlap_region(self):
+    def reset_overlap_region(self, ant_idx: int, pol_idx: int, first_iteration: bool = False):
         """Set up overlap region for continuity between iterations"""
-        if hasattr(self, '_first_iteration') and not self._first_iteration:
+
+        if first_iteration:
             # Keep overlap from previous iteration
             ntap = self.config.ntap
-            self.pfb_buf[:, :, :ntap-1, :] = self.pfb_buf[:, :, -(ntap-1):, :]
-            self.pfb_idx[:, :] = (ntap - 1) * self.sizes.lblock
+            self.pfb_buf[:ntap-1, :] = self.overlap_buf[ant_idx, pol_idx, :, :]
+            self.pfb_idx[ant_idx, pol_idx] = (ntap - 1) * self.sizes.lblock
         else:
-            self._first_iteration = False
+            self._first_iteration = 1
     
     def add_remaining_to_pfb_buffer(self, ant_idx: int, pol_idx: int) -> bool:
         """
@@ -109,7 +116,7 @@ class BufferManager:
             self._handle_buffer_overflow(ant_idx, pol_idx, available_space)
         else:
             # add all remaining data
-            self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:pfb_pos + rem_size] = self.rem_buf[ant_idx, pol_idx, :rem_size]
+            self.pfb_buf.flat[pfb_pos:pfb_pos + rem_size] = self.rem_buf[ant_idx, pol_idx, :rem_size]
             self.pfb_idx[ant_idx, pol_idx] += rem_size
             self.rem_idx[ant_idx, pol_idx] = 0
         
@@ -120,7 +127,7 @@ class BufferManager:
         rem_size = self.rem_idx[ant_idx, pol_idx]
         
         # Fill remaining PFB space
-        self.pfb_buf[ant_idx, pol_idx].flat[self.pfb_idx[ant_idx, pol_idx]:] = self.rem_buf[ant_idx, pol_idx, :available_space]
+        self.pfb_buf.flat[self.pfb_idx[ant_idx, pol_idx]:] = self.rem_buf[ant_idx, pol_idx, :available_space]
         
         # Shift remaining data
         overflow_size = rem_size - available_space
@@ -134,34 +141,37 @@ class BufferManager:
         Add processed chunk to buffers.
         Returns True if PFB buffer is full.
         """
-        chunk_size = len(processed_chunk)
+        chunk_size = len(processed_chunk) # <- Should be lchunk
+        assert chunk_size == self.sizes.lchunk, f"Chunk size {chunk_size} does not match expected {self.sizes.lchunk}"
         pfb_pos = self.pfb_idx[ant_idx, pol_idx]
-        final_pos = pfb_pos + chunk_size
+        final_pos = pfb_pos + self.sizes.lchunk
+        print(pfb_pos, final_pos, "pfb_pos, final_pos")
         
         if final_pos > self.sizes.szblock:
             # Handle overflow
+            print("overflow detected, chunk size:", self.sizes.lchunk, "available space:", self.sizes.szblock - pfb_pos)
             available_space = self.sizes.szblock - pfb_pos
-            self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:] = processed_chunk[:available_space]
+            self.pfb_buf.flat[pfb_pos:] = processed_chunk[:available_space]
             
             # Store overflow in remaining buffer
-            overflow_size = chunk_size - available_space
+            overflow_size = self.sizes.lchunk - available_space
             # Assunmes the remaining buffer is already empty
             self.rem_buf[ant_idx, pol_idx, :overflow_size] = processed_chunk[available_space:]
             self.rem_idx[ant_idx, pol_idx] = overflow_size
             self.pfb_idx[ant_idx, pol_idx] = self.sizes.szblock
-            return True
         else:
             # Normal case
-            self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:final_pos] = processed_chunk
+            self.pfb_buf.flat[pfb_pos:final_pos] = processed_chunk
             self.pfb_idx[ant_idx, pol_idx] = final_pos
-            return final_pos == self.sizes.szblock
+        
+        return final_pos >= self.sizes.szblock
     
     def pad_incomplete_buffer(self, ant_idx: int, pol_idx: int):
         """Pad incomplete PFB buffer with zeros"""
 
         current_pos = self.pfb_idx[ant_idx, pol_idx]
         if current_pos < self.sizes.szblock:
-            self.pfb_buf[ant_idx, pol_idx].flat[current_pos:] = 0.0
+            self.pfb_buf.flat[current_pos:] = 0.0
 
 class IPFBProcessor:
     """Handles IPFB processing of chunks to time stream"""
@@ -255,6 +265,8 @@ def plan_chunks(nchunks: int, lchunk: int, nblock: int, lblock: int, ntap: int) 
     
     return ranges
 
+if __name__ == "__main__":
+    print(plan_chunks(100,4096*2048,50, 4096*64,4))
 
 def setup_antenna_objects(idxs: List[int], files: List[str], config: ProcessingConfig) -> Tuple[List, np.ndarray]:
     """Set up antenna file iterators"""
@@ -267,6 +279,9 @@ def setup_antenna_objects(idxs: List[int], files: List[str], config: ProcessingC
         antenna_objs.append(antenna)
     
     # Get channel information from first antenna
+    # print(antenna_objs)
+    # print(idxs, files, "idxs, files")
+    # raise ValueError("Check antenna_objs")
     channels = np.asarray(antenna_objs[0].obj.channels, dtype='int64')
     return antenna_objs, channels
 
@@ -298,6 +313,8 @@ def fill_pfb_buffer(ant_idx: int, pol_idx: int, subjobs: List, buffer_mgr: Buffe
     
     # Process each chunk for this antenna/polarization
     for chunk_idx, chunks in enumerate(subjobs):
+        print(chunk_idx, "chunk_idx")
+        print(buffer_mgr.pfb_idx[ant_idx, pol_idx], "pfb_idx before processing")
         assert not buffer_full
         chunk = chunks[ant_idx]
         
@@ -307,19 +324,7 @@ def fill_pfb_buffer(ant_idx: int, pol_idx: int, subjobs: List, buffer_mgr: Buffe
             missing_tracker.add_chunk_info(ant_idx, chunk, config.acclen, pfb_blocks_affected)
         
         # Process chunk through inverse PFB
-        buffer_full = ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnum)
-        
-        # Update edge data for next iteration
-        # pol_data = cp.empty((config.acclen + 2*config.cut, 2049), dtype='complex64', order='C')
-        # pol_data[2*config.cut:] = bdc.make_continuous_gpu(
-        #     chunk[f"pol{pol_idx}"], chunk['specnums'], start_specnum,
-        #     channels[slice(None)], config.acclen, nchans=2049
-        # )
-        # buffer_mgr.cut_pol[ant_idx, pol_idx, :, :] = pol_data[-2*config.cut:]
-        
-        # # Add processed chunk to buffer
-        # buffer_full = buffer_mgr.add_chunk_to_buffer(ant_idx, pol_idx, processed_chunk)
-        
+        buffer_full = ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnum)        
     
     # Calculate missing data average for this job
     if pol_idx == 0:
@@ -327,13 +332,14 @@ def fill_pfb_buffer(ant_idx: int, pol_idx: int, subjobs: List, buffer_mgr: Buffe
     
     # Pad buffer if incomplete
     if buffer_mgr.pfb_idx[ant_idx, pol_idx] != sizes.szblock or not buffer_full:
-        if verbose:
-            pokjhgvcxcvbnm=1
 
         print(f"Job {job_idx + 1} (Ant {ant_idx}, pol {pol_idx}): ")
         print(f"Buffer Full: {buffer_full} with only {buffer_mgr.pfb_idx[ant_idx, pol_idx]} < {sizes.szblock}")\
 
         buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
+    
+    buffer_mgr.overlap_buf[ant_idx,pol_idx,:,:] = buffer_mgr.pfb_buf[ - (config.ntap - 1):, :]
+
 
 
 def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int, nblock: int, 
@@ -394,8 +400,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, len(job_chunks)), dtype="complex64", order="F")
     
     start_specnums = [ant.spec_num_start for ant in antenna_objs]
-    jobs = list(zip(*antenna_objs)) # <- got to fix this. we are loading all antennas at once, so this is a list of tuples
-    
+   
     if verbose:
         _print_debug_info(config, sizes, buffer_mgr, len(job_chunks), nchunks)
     
@@ -405,12 +410,13 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     for job_idx, (chunk_start, chunk_end) in enumerate(job_chunks):
         start_time = time.perf_counter()
         
-        buffer_mgr.reset_overlap_region()
-        subjobs = jobs[chunk_start:chunk_end] if chunk_end is not None else jobs[chunk_start:] # check if this is right
-        
+        subjobs = list(islice(zip(*antenna_objs),chunk_start, chunk_end))  # List of chunks for each antenna
+        print(f'job idx {job_idx}, chunk_start {chunk_start}, chunk_end {chunk_end}, subjobs {len(subjobs)}')
         # Process each antenna and polarization
         for ant_idx in range(config.nant):
             for pol_idx in range(config.npol):
+                print(ant_idx, pol_idx, "ant_idx, pol_idx")
+                buffer_mgr.reset_overlap_region(ant_idx, pol_idx, first_iteration=(job_idx == 0))
                 fill_pfb_buffer(
                     ant_idx, pol_idx, subjobs, buffer_mgr, ipfb_processor,
                     missing_tracker, job_idx, start_specnums[ant_idx], 
@@ -421,7 +427,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                 # Generate PFB output for cross-correlation
                 output_start = ant_idx * config.npol + pol_idx # <-- still not sure
                 xin[output_start, :, :] = pu.cupy_pfb(
-                    buffer_mgr.pfb_buf[ant_idx, pol_idx], 
+                    buffer_mgr.pfb_buf, 
                     cupy_win_big,
                     nchan=2048 * osamp + 1, 
                     ntap=4

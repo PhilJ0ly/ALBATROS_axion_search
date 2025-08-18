@@ -39,7 +39,7 @@ if __name__=="__main__":
     # if len(sys.argv) > 2 and sys.argv[1].lower()=='cpu':
     #     n_cores = int(sys.argv[2]) 
 
-    config_fn = "config_axion_gpu.json"
+    config_fn = f"config_axion_{pUnit}.json"
     if len(sys.argv) > 2:
         config_fn = sys.argv[2]  
     
@@ -67,8 +67,8 @@ if __name__=="__main__":
     pfb_mult = config["correlation"]["pfb_size_multiplier"]
     
     pfb_size = osamp*pfb_mult
-    # outdir = f"/project/rrg-sievers/philj0ly/xcorr_{pUnit}"
-    outdir = f"/scratch/philj0ly/xcorr_{pUnit}"
+    # outdir = f"/scratch/philj0ly/xcorr_{pUnit}"
+    outdir = "/scratch/philj0ly/test_08_18"
     
     # assert pfb_mult >= 8 
 
@@ -101,8 +101,8 @@ if __name__=="__main__":
         # from helper_gpu_stream import repfb_xcorr_avg
         # pols,missing_fraction,channels, _,_=repfb_xcorr_avg(idxs,files,acclen,nchunks, 3, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
 
-        from helper_gpu_stream_clean import repfb_xcorr_avg        
-        pols,missing_fraction,channels, _, _ =repfb_xcorr_avg(idxs,files,acclen,nchunks,3, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
+        from helper_gpu_stream_cleanest import repfb_xcorr_avg        
+        pols,missing_fraction,channels, _, _ =repfb_xcorr_avg(idxs,files,acclen,nchunks,10, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
     else:
         import helper_cpu
         os.environ['NUMBA_OPT']='3'
@@ -116,7 +116,7 @@ if __name__=="__main__":
     
     print("Processing took", t2-t1, "s")
 
-    fname = f"clean2_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(nchunks)}_{chanstart}_{chanend}.npz"
+    fname = f"cleanest_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(nchunks)}_{chanstart}_{chanend}.npz"
     # fGPUname = f"stream_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(njobs)}_{chanstart}_{chanend}.npz"
     fpath = path.join(outdir,fname)
     np.savez(fpath,data=pols.data,mask=pols.mask,missing_fraction=missing_fraction,chans=channels)
