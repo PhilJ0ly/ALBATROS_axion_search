@@ -12,7 +12,7 @@ sys.path.insert(0,path.expanduser("~"))
 import json
 
 import helper
-from helper_stream import get_time_stream
+from helper_time_stream import get_time_stream
 
 if __name__=="__main__": 
 
@@ -59,13 +59,13 @@ if __name__=="__main__":
     t1=time.time()       
 
        
-    time_stream, missing_fraction, _ = get_time_stream(idxs,files,acclen,nchunks, chanstart,chanend,cut=cut,filt_thresh=0.45)
+    time_stream, missing_fraction, channels = get_time_stream(idxs,files,acclen,nchunks, chanstart,chanend,cut=cut,filt_thresh=0.45)
     
     t2=time.time()
     
     print("Processing took", t2-t1, "s")
 
-    fname = f"time_stream_{str(init_t)}-{str(end_t)}_{str(acclen)}_{str(nchunks)}_{chanstart}-{chanend}.npz"
+    fname = f"time_stream_test_{str(init_t)}-{str(end_t)}_{str(acclen)}_{str(nchunks)}_{chanstart}-{chanend}.npz"
     fpath = path.join(outdir,fname)
     np.savez(fpath,data=time_stream, missing_fraction=missing_fraction, chans=channels)
 

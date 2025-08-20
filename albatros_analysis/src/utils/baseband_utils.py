@@ -68,6 +68,7 @@ def get_file_from_timestamp(ts, dir_parent, search_type, force_ts=False, acclen=
         [int(s.split("/")[-1].split(".")[0]) for s in files]
     )  # will work with both tstamp.raw (bband) and 5digit/tstamp/ (direct)
     tstamps.sort()  # could remove this.
+    print(tstamps)
     # print(tstamps)
     if search_type == "d":
         delta = 3600  # direct spectra files are time-limited files. no need to run a median.
@@ -88,9 +89,15 @@ def get_file_from_timestamp(ts, dir_parent, search_type, force_ts=False, acclen=
     # print(tstamps  < ts)
     # xx=(tstamps < ts).astype(int)
     # print(xx)
+    # raise ValueError
     if len(tstamps) == 1:
         flip = 0
     else:
+        print(10*'-')
+        print(tstamps, delta, ts)
+        print(np.diff(tstamps > ts))
+        print(np.where(np.diff(tstamps > ts) != 0))
+
         flip = np.where(np.diff(tstamps > ts) != 0)[0][0]
     # plt.plot(tstamps>ts)
     # print(flip,delta,tstamps[flip])

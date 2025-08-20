@@ -2,14 +2,14 @@
     "antennas": {
         "ALB1": {
             "name": "Antenna 1",
-            "path": "/scratch/mohanagr/mars_axion/baseband/",
+            "path": "/scratch/philj0ly/simple_test_data/",
             "coordinates": [51.4646065, -68.2352594, 341.052],
             "clock_offset": 0
         }
     },
     "correlation": {
-        "start_timestamp": 1721500041,
-        "end_timestamp": 1721500046
+        "start_timestamp": 1721500016,
+        "end_timestamp": 17215000021
     },
     "frequency": {
         "start_channel": 121, 
