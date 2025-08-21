@@ -10,6 +10,7 @@ Usage:
     Also, if the machine has both cpu as well as gpu and cpu wants to be used adjust the ./albatros_analysis/__init__.py
     such that xp = numpy
      
+    Ensure that environment variable USE_GPU is set to '1' for GPU usage.
     Run
         python xcorr_gpu_cpu.py <processing unit (gpu/cpu)>
     [Defaults to cpu]
