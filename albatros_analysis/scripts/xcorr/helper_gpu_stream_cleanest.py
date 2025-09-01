@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 import ctypes
-lib = ctypes.CDLL('./libcgemm_batch.so')
+lib = ctypes.CDLL('/home/philj0ly/albatros_analysis/scripts/xcorr/libcgemm_batch.so')
 
 lib.cgemm_strided_batched.argtypes = [
     ctypes.c_void_p,  # A.ptr
@@ -92,7 +92,7 @@ class BufferManager:
     def reset_overlap_region(self):
         """Set up overlap region for continuity between iterations"""
         ntap = self.config.ntap
-        self.pfb_buf[:, :, :ntap-1, :] = self.pfb_buf[:, :, -(ntap-1):, :]
+        self.pfb_buf[:, :, :ntap-1, :] = self.pfb_buf[:, :, -(ntap-1):, :].copy()
         self.pfb_idx[:, :] = (ntap - 1) * self.sizes.lblock
     
     def add_remaining_to_pfb_buffer(self, ant_idx: int, pol_idx: int):
@@ -123,7 +123,7 @@ class BufferManager:
         
         # Shift remaining data
         overflow_size = rem_size - available_space
-        self.rem_buf[ant_idx, pol_idx, :overflow_size] = self.rem_buf[ant_idx, pol_idx, available_space:rem_size]
+        self.rem_buf[ant_idx, pol_idx, :overflow_size] = self.rem_buf[ant_idx, pol_idx, available_space:rem_size].copy()
         
         self.rem_idx[ant_idx, pol_idx] = overflow_size
         self.pfb_idx[ant_idx, pol_idx] = self.sizes.szblock
@@ -150,7 +150,7 @@ class BufferManager:
             self.pfb_idx[ant_idx, pol_idx] = self.sizes.szblock
         else:
             # Normal case
-            self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:final_pos] = processed_chunk
+            self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:final_pos] = processed_chunk[:]
             self.pfb_idx[ant_idx, pol_idx] = final_pos
 
     
@@ -169,6 +169,8 @@ class IPFBProcessor:
         self.channels = channels
         self.filt = filt
         self.buffers = buffer_mgr
+        self.ts = cp.zeros(buffer_mgr.sizes.szblock, dtype='float32')
+        # self.time = cp.empty(buffer_mgr.sizes.szblock, dtype='float64')
     
     def process_chunk(self, chunk: dict, ant_idx: int, pol_idx: int, start_specnum: int):
         """Process a single chunk through inverse PFB"""
@@ -190,28 +192,7 @@ class IPFBProcessor:
         # Apply inverse PFB and remove edge effects and add chunk to PFB buffer
         self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
 
-    def process_dummy_chunk(self, ant_idx: int, pol_idx: int, gen_type: str='constant', specs: list = None):
-        ts = cp.zeros(self.buffers.sizes.lchunk, dtype='float32')
-
-        if gen_type =='constant':
-            # specs = (value,)
-            ts = cp.ones(self.buffers.sizes.lchunk, dtype='float32') * specs[0]
-        elif gen_type == 'uniform':
-            # specs = (min, max)
-            ts = cp.random.uniform(specs[0], specs[1], size=self.buffers.sizes.lchunk).astype('float32')
-        elif gen_type == 'gaussian':
-            # specs = (mean, stddev)
-            ts = cp.random.normal(specs[0], specs[1], size=self.buffers.sizes.lchunk).astype('float32')
-        elif gen_type == 'sine':
-            # specs = (frequency, sample_rate, amp, t0) # <- t0 is the time step start offset
-            t = (cp.arange(self.buffers.sizes.lchunk) + specs[3]) / specs[1]
-            ts = (specs[2]*cp.sin(2 * cp.pi * specs[0] * t)).astype('float32')
-        else:
-            ts = cp.zeros(self.buffers.sizes.lchunk, dtype='float32')
-
-        self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, ts)
-
-
+    
 
 class MissingDataTracker:
     """Tracks missing data fractions across processing"""
@@ -240,9 +221,6 @@ class MissingDataTracker:
         
         # Remove entries that won't affect future jobs
         self.missing_count[ant_idx] = [info for info in self.missing_count[ant_idx] if info[1] > 0]
-
-
-
 
 def setup_antenna_objects(idxs: List[int], files: List[str], config: ProcessingConfig) -> Tuple[List, np.ndarray]:
     """Set up antenna file iterators"""
@@ -321,8 +299,6 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     # Setup frequency ranges
     repfb_chanstart = channels[config.chanstart] * osamp
     repfb_chanend = channels[config.chanend] * osamp
-
-    
     
     # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
@@ -360,7 +336,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                 missing_tracker.calculate_job_average(ant_idx, job_idx)
 
                 for pol_idx in range(config.npol):
-                    output_start = ant_idx * config.npol + pol_idx # <-- still not sure
+                    output_start = ant_idx * config.nant + pol_idx # <-- still not sure
                     xin[output_start, :, :] = pu.cupy_pfb(
                         buffer_mgr.pfb_buf[ant_idx, pol_idx], 
                         cupy_win_big,
@@ -394,7 +370,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
 
             for pol_idx in range(config.npol):
                 buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
-                output_start = ant_idx * config.npol + pol_idx # <-- still not sure
+                output_start = ant_idx * config.nant + pol_idx # <-- still not sure
                 xin[output_start, :, :] = pu.cupy_pfb(
                     buffer_mgr.pfb_buf[ant_idx, pol_idx], 
                     cupy_win_big,
@@ -417,146 +393,6 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     freqs = np.arange(repfb_chanstart, repfb_chanend)
     
     return vis, missing_tracker.missing_fraction, freqs, cupy_win_big, filt
-
-
-def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1, cut: int = 10, filt_thresh: float = 0.45, gen_type: str = 'constant') -> np.ndarray:
-
-    """
-    Perform reverse PFB and GPU-based cross-correlation on streaming baseband data.
-    
-    Args:
-        acclen: Accumulation length in units of 4096-sample IPFB output blocks
-        nchunks: Total number of IPFB output chunks to process
-        nblock: Number of PFB blocks per iteration (streamed)
-        osamp: Oversampling factor for RePFB
-        cut: Number of rows to cut from top and bottom of IPFB
-        filt_thresh: Regularization parameter for IPFB deconvolution filter
-    
-    Returns:
-        vis: Averaged cross-correlation matrix per time and frequency
-    """
-     
-    sr = 250e6  # Sample rate in Samples/second
-
-    specs = {
-        'constant': [1.0,], # value
-        'uniform': [0.0, 1.0], # min, max
-        'gaussian': [0.0, 1.0], # mean, stddev
-        'sine': [5e3, sr, 1.0, 0.0]  # frequency, sample_rate, amp, t0
-    }
-    assert gen_type in specs, f"Invalid gen_type: {gen_type}. Must be one of {list(specs.keys())}."
-    
-    # Setup configuration
-    config = ProcessingConfig(
-        acclen=acclen, pfb_size=0, nchunks=nchunks, nblock=nblock,
-        chanstart=0, chanend=1, osamp=osamp, nant=nant, cut=cut, filt_thresh=filt_thresh
-    )
-    sizes = BufferSizes.from_config(config)
-    
-    # Setup components
-    cupy_win_big, _ = setup_filters_and_windows(config)
-    
-    # Initialize managers
-    buffer_mgr = BufferManager(config, sizes)
-    ipfb_processor = IPFBProcessor(config, buffer_mgr, None, None)
-    
-    # Setup frequency ranges
-    repfb_chanstart = 0 * osamp
-    repfb_chanend = 1 * osamp
-
-    
-    
-    # Initialize output arrays
-    xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
-    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
-
-    print("Important Values:")
-    print(f"nblock: {config.nblock}, lblock: {sizes.lblock}, szblock: {sizes.szblock}")
-    print(f"ipfb_size: {config.acclen}, lchunk: {sizes.lchunk}\n")
-    
-    print('-'*20, ' ', 0, '/', nchunks, '-'*20)
-    print('PFB Buffer', buffer_mgr.pfb_idx)
-    print('Remaining Buffer', buffer_mgr.rem_idx)
-
-    job_idx = 0
-    for i in range(nchunks):
-
-        for ant_idx in range(config.nant):
-            for pol_idx in range(config.npol):
-                ipfb_processor.process_dummy_chunk(ant_idx, pol_idx, gen_type=gen_type, specs=specs[gen_type])
-
-                if gen_type == 'sine':
-                    specs[gen_type][-1] += sizes.lchunk  # Increment time step offset for sine wave
-
-        print('-'*20, ' ', i+1, '/', nchunks, '-'*20)
-        print('PFB Buffer', buffer_mgr.pfb_idx)
-        print('Remaining Buffer', buffer_mgr.rem_idx)
-                
-    
-        # All PFB idices should be the same after processing all antennas
-        assert (buffer_mgr.pfb_idx == buffer_mgr.pfb_idx[0,0]).all()
-
-        # We know that all antennas/pols have the same PFB index after processing so is sufficient to check one
-        while buffer_mgr.pfb_idx[0,0] == sizes.szblock:
-            print('='*20, 'PFB Buffer Full', '='*20)
-            print('PFB Buffer', buffer_mgr.pfb_idx)
-            print('Remaining Buffer', buffer_mgr.rem_idx)
-            # Generate PFB output for cross-correlation
-            for ant_idx in range(config.nant):
-                for pol_idx in range(config.npol):
-                    output_start = ant_idx * config.npol + pol_idx # <-- still not sure
-                    xin[output_start, :, :] = pu.cupy_pfb(
-                        buffer_mgr.pfb_buf[ant_idx, pol_idx], 
-                        cupy_win_big,
-                        nchan=2048 * osamp + 1, 
-                        ntap=4
-                    )[:, repfb_chanstart:repfb_chanend]
-
-            vis[:, :, :, job_idx] = cp.asnumpy(
-                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
-            )
-
-            buffer_mgr.reset_overlap_region()
-            for ant_idx in range(config.nant):
-                for pol_idx in range(config.npol):
-                    # Add remaining data to PFB buffer
-                    buffer_mgr.add_remaining_to_pfb_buffer(ant_idx, pol_idx)
-
-            
-            print('PFB Buffer After', buffer_mgr.pfb_idx)
-            print('Remaining Buffer After', buffer_mgr.rem_idx)
-
-            job_idx += 1
-
-        
-        if  job_idx % 100 == 0:
-            print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} ")
-    
-    # Pad buffer if incomplete
-    if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
-        print(f"Job {job_idx + 1}/{sizes.num_of_pfbs}: ")
-        print(f"Buffer not Full with only {buffer_mgr.pfb_idx[0,0]} < {sizes.szblock}")
-
-        for ant_idx in range(config.nant):
-            for pol_idx in range(config.npol):
-                buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
-                output_start = ant_idx * config.npol + pol_idx # <-- still not sure
-                xin[output_start, :, :] = pu.cupy_pfb(
-                    buffer_mgr.pfb_buf[ant_idx, pol_idx], 
-                    cupy_win_big,
-                    nchan=2048 * osamp + 1, 
-                    ntap=4
-                )[:, repfb_chanstart:repfb_chanend]
-
-        vis[:, :, :, job_idx] = cp.asnumpy(
-            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
-        )
-        print("PFB buffer padded and processed")
-    
-    vis = np.ma.masked_invalid(vis)
-    
-    return vis
-
 
 
 def _print_debug_info(config: ProcessingConfig, sizes: BufferSizes, buffer_mgr: BufferManager, n_job_chunks: int, nchunks: int):

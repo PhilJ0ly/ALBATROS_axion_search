@@ -170,6 +170,7 @@ def cpu_pfb(timestream, win, scratch=None, nchan=2049, ntap=4, n_workers=None):
         out=rfft(scratch,axis=1)
 
     return out
+    
 
 
 def get_matft_cpu(nslice,nchan=2049,ntap=4, n_workers=None):

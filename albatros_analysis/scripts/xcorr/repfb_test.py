@@ -29,25 +29,29 @@ from helper_gpu_stream_cleanest import repfb_test
 
 if __name__=="__main__":
 
-    outdir = "/scratch/philj0ly/test_08_21"
+    outdir = "/scratch/philj0ly/test_08_25"
 
     print("Beginning Testing...\n")
 
-    acclen = 2100
-    nchunks = 15
-    osamp = 64
+    acclen = 1792
+    nchunks = 24
+    osamp = 1024
     cut = 19
-    nblock = 10
+    nblock = 39
     nant = 1
-    gen_type = 'uniform'  # Options: 'constant', 'uniform',  'gaussian', 'sine'
+    gen_types = ['constant', 'uniform', 'gaussian', 'sine']
+    # gen_type = 'uniform'  # Options: 'constant', 'uniform',  'gaussian', 'sine'
+    gen_types=['sine']
 
-           
-    pols =repfb_test(acclen,nchunks,nblock, osamp, nant=1, cut=cut,filt_thresh=0.45, gen_type=gen_type)
-    
+    for gen_type in gen_types: 
+        print("\n", 50*"~")
+        print(f"Testing gen_type: {gen_type}")
+        print(50*"~")     
+        pols, true_out =repfb_test(acclen,nchunks,nblock, osamp, nant=1, cut=cut,filt_thresh=0, gen_type=gen_type)
 
-    fname = f"test_{gen_type}_{str(acclen)}_{str(osamp)}.npz"
-    fpath = path.join(outdir,fname)
-    np.savez(fpath,data=pols.data,mask=pols.mask)
+        fname = f"test_{gen_type}_{str(acclen)}_{str(osamp)}.npz"
+        fpath = path.join(outdir,fname)
+        np.savez(fpath,data=pols.data,mask=pols.mask, true_data=true_out, true_mask=true_out.mask)
 
-    print("\nSaved with an oversampling rate of", osamp, "and an acclen of", acclen, "at")
-    print(fpath)
+        print("\nSaved with an oversampling rate of", osamp, "and an acclen of", acclen, "at")
+        print(fpath)
