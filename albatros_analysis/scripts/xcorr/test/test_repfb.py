@@ -1,5 +1,9 @@
 # Philippe Joly 2025-09-01
 
+"""
+Test script for the streaming RePFB and GPU-based cross-correlation on streaming baseband data.
+"""
+
 import sys
 from os import path
 sys.path.insert(0, path.expanduser("~"))
@@ -14,7 +18,7 @@ from typing import List, Tuple, Optional
 # import ctypes
 # lib = ctypes.CDLL('../libcgemm_batch.so')
 
-from albatros_analysis.scripts.xcorr.helper_gpu_stream_cleanest import *
+from albatros_analysis.scripts.xcorr.helper_gpu import *
 
 
 

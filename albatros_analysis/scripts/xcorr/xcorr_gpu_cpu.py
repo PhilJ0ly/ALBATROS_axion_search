@@ -102,7 +102,7 @@ if __name__=="__main__":
         # from helper_gpu_stream import repfb_xcorr_avg
         # pols,missing_fraction,channels, _,_=repfb_xcorr_avg(idxs,files,acclen,nchunks, 3, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
 
-        from helper_gpu_stream_cleanest import repfb_xcorr_avg        
+        from helper_gpu import repfb_xcorr_avg        
         pols,missing_fraction,channels, _, _ =repfb_xcorr_avg(idxs,files,acclen,nchunks,10, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
     else:
         import helper_cpu
