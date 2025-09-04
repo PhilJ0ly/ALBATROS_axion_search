@@ -1,0 +1,25 @@
+{
+    "antennas": {
+        "ALB1": {
+            "name": "Antenna 1",
+            "path": "/scratch//mohanagr/mars_axion/baseband/",
+            "coordinates": [51.4646065, -68.2352594, 341.052],
+            "clock_offset": 0
+        }
+    },
+    "correlation": {
+        "osamp": 65536, 
+        "acclen": 2048, 
+        "nblock": 10,
+        "cut": 100,
+        "bin_num": 20
+    },
+    "misc": {
+        "out_dir": "/scratch/philj0ly/plasma_bin_data_09_04/",
+        "plasma_path": "/project/rrg-sievers/philj0ly/CHAIM/CSV/ECHAIM_nmf2.csv"
+    },
+    "frequency": {
+        "start_channel": 47, 
+        "end_channel": 50
+    }
+}

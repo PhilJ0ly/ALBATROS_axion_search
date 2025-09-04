@@ -248,7 +248,7 @@ def setup_filters_and_windows(config: ProcessingConfig, cupy_win_big: Optional[c
 
 def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int, nblock: int, 
                    chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45,
-                   cupy_win_big: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, 
+                   window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, 
                    verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, cp.ndarray, cp.ndarray]:
     """
     Perform reverse PFB and GPU-based cross-correlation on streaming baseband data.
