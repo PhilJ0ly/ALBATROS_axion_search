@@ -251,7 +251,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                    window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, 
                    verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, cp.ndarray, cp.ndarray]:
     """
-    Perform reverse PFB and GPU-based cross-correlation on streaming baseband data.
+    Perform oversampling PFB and GPU-based cross-correlation on streaming baseband data.
     
     Args:
         idxs: List of antenna indices

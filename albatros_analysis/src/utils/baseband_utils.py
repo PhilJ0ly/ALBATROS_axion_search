@@ -52,7 +52,8 @@ def get_file_from_timestamp(ts, dir_parent, search_type, force_ts=False, acclen=
         from the next available timestamp that's helpfully suggested.
     """
     assert(search_type in ["f", "d"])
-    if isinstance(ts, int) or isinstance(ts, float):
+    # if isinstance(ts, int) or isinstance(ts, float):
+    if not isinstance(ts, str):
         ts = str(ts)
     stamps = [int(ts[:5]), int(ts[:5])-1]
     search_tags = [f".*\/{stamp}[0-9]{{5}}" for stamp in stamps]

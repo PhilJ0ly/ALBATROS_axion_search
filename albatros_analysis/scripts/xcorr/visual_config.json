@@ -2,7 +2,7 @@
     "antennas": {
         "ALB1": {
             "name": "Antenna 1",
-            "path": "/scratch//mohanagr/mars_axion/baseband/",
+            "path": "/scratch/mohanagr/mars_axion/baseband/",
             "coordinates": [51.4646065, -68.2352594, 341.052],
             "clock_offset": 0
         }
