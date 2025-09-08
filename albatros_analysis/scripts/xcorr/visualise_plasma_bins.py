@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import json
+import cupy as cp
 from typing import List, Tuple, Optional
 
 from os import path
@@ -18,7 +19,7 @@ from albatros_analysis.scripts.xcorr.helper import get_init_info_all_ant
 from albatros_analysis.scripts.xcorr.helper_gpu import *
 
 
-global plasma_t_diff = 5*60 # (s) 5 minutes b/w measurements <-- to do: get from data
+# global plasma_t_diff = 5*60 # (s) 5 minutes b/w measurements <-- to do: get from data
 
 def get_plasma_freq(nmf2: np.ndarray) -> np.ndarray:
     eps = 8.8541878188 * 1e-12 # vacuum electric permittivity  [ F / m]
@@ -85,6 +86,60 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
 
     return time, plasma, bin_edges
 
+def get_plots(avg_data, mask, bin_edges, bin_counts, chans, t_chunk, osamp, width, height, outdir, log=False, all_stokes=False):
+    df_record = 125e6/2048 # (Hz) frequency range / # of channels
+    df = df_record/osamp # (Hz) / rechannelization factor
+    freqs = chans*df
+
+    avg_data = np.ma.MaskedArray(data=avg_data, mask=mask)
+
+    scale = 'linear'
+    if log:
+        scale = 'log'
+
+    for i in avg_data:
+        I_stokes = (pols[0,0] + pols[1,1]).real.astype("float32") # <- to check
+        total_time = bin_counts[i]*t_chunk
+
+        plt.figure(figsize=(width, height))
+        plt.plot(freqs, I_stokes, label='I Stokes', color='blue')
+
+        if all_stokes:
+            Q_stokes = (pols[0,0] - pols[1,1]).real.astype("float32")
+            U_stokes = pols[1,0] + pols[0,1]
+            V_stokes = pols[1,0] - pols[0,1]
+            plt.plot(freqs, Q_stokes, label='Q Stokes', color='orange')
+            plt.plot(freqs, np.abs(U_stokes), label='|U Stokes|', color='green')
+            plt.plot(freqs, np.abs(V_stokes), label='|V Stokes|', color='red')
+
+        plt.title(f'Stokes Parameter - Plasma Frequency from {bin_edges[i]} to {bin_edges[i+1]} Hz over {total_time/60} minutes')
+        plt.xlabel('Frequency (Hz)')
+        plt.ylabel('Intensity')
+        plt.yscale(scale)
+        plt.grid()
+        plt.legend()
+
+        fname = f'graphs/stokes_{all_stokes}_plot_band_log_{log}_{bin_edges[i]}_{bin_edges[i+1]}_{str(osamp)}_{total_time}.png'
+        fpath = path.join(outdir,fname)
+        plt.savefig(fpath)
+        plt.close()
+    
+    print(f"Saved plots to {outdir}")
+
+def plot_from_data(data_path, width, height, outdir, log=False, all_stokes=False):
+    with np.load(data_path) as f:
+        avg_data = f["data"]
+        mask = f["mask"]
+        bin_edges = f["bin_edges"]
+        bin_counts = f["bin_counts"]
+        bin_edges = f["bin_edges"]
+        t_chunk = f["t_chunk"]
+        chans = f["chans"]
+        osamp = f["osamp"]
+
+    get_plots(avg_data, mask, bin_edges, bin_counts, chans, t_chunk, osamp, width, height, log=log, all_stokes=all_stokes)
+
+
 def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int, idxs: List[int], files: List[str], acclen: int,  nblock: int, 
                    chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45,
                    window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, 
@@ -149,7 +204,10 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
     
     time_track = init_t
     cur_t_interval_idx = 0
-    
+    time_idx = np.array([[],[]])
+    t_chunk = 4096 * config.acclen / 250e6 # in seconds <-- check if correct
+    bin_count = np.zeros(bin_num, dtype='int64')
+
     job_idx = 0
 
 
@@ -158,25 +216,24 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
 
         for ant_idx in range(config.nant):
             chunk = chunks[ant_idx]
-
-            pfb_blocks_affected = ((buffer_mgr.pfb_idx[ant_idx, 0] + sizes.lchunk) // sizes.lblock) % config.nblock + 1
-            missing_tracker.add_chunk_info(ant_idx, chunk, config.acclen, pfb_blocks_affected)
-
             for pol_idx in range(config.npol):
                 ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnums[ant_idx])
                 
-    
+        time_track += t_chunk
+        if cur_t_interval_idx < len(time)-1 and time_track > time[cur_t_interval_idx+1]: 
+            cur_t_interval_idx += 1
+        time_pfb_blocks_affected = ((buffer_mgr.pfb_idx[0, 0] + sizes.lchunk) // sizes.lblock) % config.nblock + 1
+        time_idx = np.append(time_idx, np.array([[cur_t_interval_idx],[time_pfb_blocks_affected]]), axis=1)
+        
+
         # All PFB idices should be the same after processing all antennas
-        assert (buffer_mgr.pfb_idx == buffer_mgr.pfb_idx[0,0]).all()
+        assert (buffer_mgr.pfb_idx == buffer_mgr.pfb_idx[0,0]).all(), "The PFB idx are not equal across nant or npol"
 
         # We know that all antennas/pols have the same PFB index after processing so is sufficient to check one
         while buffer_mgr.pfb_idx[0,0] == sizes.szblock:
             pfbed = True
             # Generate PFB output for cross-correlation
             for ant_idx in range(config.nant):
-                
-                missing_tracker.calculate_job_average(ant_idx, job_idx)
-
                 for pol_idx in range(config.npol):
                     output_start = ant_idx * config.nant + pol_idx # <-- still not sure
                     xin[output_start, :, :] = pu.cupy_pfb(
@@ -186,9 +243,18 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
                         ntap=4
                     )[:, repfb_chanstart:repfb_chanend]
 
-            vis[:, :, :, job_idx] = cp.asnumpy(
+            bin_idx = np.argmax(np.bincount(time_idx[0]))
+            vis[bin_idx,:, :, :] += cp.asnumpy(
                 cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
             )
+            bin_count[bin_idx] += 1
+
+            # time_idx = time_idx[-int((config.ntap-1)/(config.nblock+config.ntap-1)*len(time_idx)):] # keep only the last few time indices that could still be in the buffer (equivalent to the overlap region)
+            time_idx[1] -= 1
+            mask = time_idx[1] != 0
+            time_idx = time_idx[:,mask]
+ 
+
             buffer_mgr.reset_overlap_region()
             for ant_idx in range(config.nant):
                 for pol_idx in range(config.npol):
@@ -197,9 +263,10 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
             job_idx += 1
 
         
-        if verbose and job_idx % 100 == 0:
-            print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} s")
-     # Pad buffer if incomplete
+            if verbose and job_idx % 100 == 0:
+                print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} s")
+        
+    # Pad buffer if incomplete
 
     if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
 
@@ -207,9 +274,6 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
         print(f"Buffer not Full with only {buffer_mgr.pfb_idx[0,0]} < {sizes.szblock}")
 
         for ant_idx in range(config.nant):
-                
-            missing_tracker.calculate_job_average(ant_idx, job_idx)
-
             for pol_idx in range(config.npol):
                 buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
                 output_start = ant_idx * config.nant + pol_idx # <-- still not sure
@@ -220,9 +284,11 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
         
-        vis[:, :, :, job_idx] = cp.asnumpy(
+        bin_idx = mode(time_idx)
+        vis[bin_idx,:, :, :] += cp.asnumpy(
             cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
         )
+        bin_count[bin_idx] += 1
 
         print("Paded and Processed Incomplete Buffer")
     
@@ -231,12 +297,12 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
         print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
         print("=" * 30)
     
-    vis = np.ma.masked_invalid(vis)
+    # vis = np.ma.masked_invalid(vis)
     freqs = np.arange(repfb_chanstart, repfb_chanend)
     
-    return vis, missing_tracker.missing_fraction, freqs, cupy_win_big, filt
+    return vis, bin_count, t_chunk freqs, cupy_win_big, filt
 
-def main(plot=False):
+def main(plot_sz=None):
     config_fn = "visual_config.json"
     if len(sys.argv) > 1:
         config_fn = sys.argv[1]  
@@ -271,39 +337,47 @@ def main(plot=False):
     plasma_path = config["misc"]["plasma_path"]
     outdir = config["misc"]["out_dir"]
 
-    obs_period = (1721342139, 1721449881) # Full observation period
-    # obs_period = [1721342139, 1721376339] # First 'continuous' chunk of observation period
-    # obs_period = [1721376339, 1721449881] # Second 'continuous' chunk of observation period
+    obs_period = (1721342139+5*60, 1721449881) # Full observation period (+5min just for buffer times will be shifted back by 2.5min)
+    # obs_period = [1721342139+5*60, 1721376339] # First 'continuous' chunk of observation period
+    # obs_period = [1721376339+5*60, 1721449881] # Second 'continuous' chunk of observation period
     # To do: get from json
 
     all_time, all_plasma = get_plasma_data(plasma_path, obs_period)
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"))
+    avg_vis = None
+    bin_counts = np.zeros(bin_num, dtype="int64")
 
     for i in range(len(binned_time)):
         print(f"Processing continuous chunk {i+1}/{len(binned_time)} over {len(binned_time[i])*5} minutes")
         window, filt = None, None
-        avg_vis, missing_frac, counts, window, filt = repfb_xcorr_bin_avg(
+        vis, bin_count, t_chunk, channels, window, filt = repfb_xcorr_bin_avg(
             binned_time[i], binned_plasma[i], bin_num,
             list(range(len(dir_parents))), dir_parents, acclen, nblock,
             chanstart, chanend, osamp, cut=cut, filt_thresh=0.45,
             window=window, filt=filt, verbose=False
         )
 
+        bin_counts += bin_count
+        if avg_vis is None:
+            avg_vis = vis
+        else:
+            avg_vis += vis
+    
+    bin_counts_reshaped = bin_counts.reshape(bin_num, 1, 1, 1)
+    avg_vis = np.where(bin_counts_reshaped == 0, 0, avg_vis / bin_counts_reshaped)
+    avg_vis = np.ma.masked_invalid(avg_vis)
+
+    fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"
+    fpath = path.join(outdir,fname)
+    np.savez(fpath, data=avg_vis.data, mask=avg_vis.mask, bin_counts=bin_counts, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
+
+    print(f"Saved ALBATROS data with an oversampling rate of {osamp} in {bin_num} plasma frequency bins at")
+    print(fpath)
+
+    if plot:
+        get_plots(avg_vis.data, avg_vis.mask, bin_edges, bin_counts, channels, t_chunk, osamp, plot_sz[0], plot_sz[1], outdir, log=True, all_stokes=False)
 
 if __name__=="__main__":
-
-    all_time = np.append(np.arange(5)*5*60, np.arange(10)*5*60+1700000000)
-    all_plasma = np.random.uniform(0, 100, size=len(all_time))
-    bin_num = 10
-    print("All times:", all_time)
-    print("All plasma freqs:", all_plasma)
-    print(30*'=')
-
-    time, plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins=False)
-    for i in range(len(time)):
-        print("Time bins:", time[i])
-        print("Plasma bins:", plasma[i])
-        print(20*'-')
-    print("Bin edges:", bin_edges)
+    main()
 
     
