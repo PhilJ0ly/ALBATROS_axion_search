@@ -31,9 +31,9 @@ def get_plasma_freq(nmf2: np.ndarray) -> np.ndarray:
 
 def get_plasma_data(plasma_path: str, obs_period: Tuple[int, int]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     try:
-        achaim = pd.read_csv(plasma_fn)
+        achaim = pd.read_csv(plasma_path)
     except Exception as e:
-        print(f"Error loading plasma frequency file {plasma_fn}: {e}")
+        print(f"Error loading plasma frequency file {plasma_path}: {e}")
         raise e
     
     achaim["datetime_fmt"] = pd.to_datetime(achaim["datetime"], format="%y%m%d_%H%M%S")
@@ -59,7 +59,7 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
 
     plasma_t_diff = np.min(np.diff(all_time))
     assert plasma_t_diff == 5*60, "plasma data time difference is not 5 minutes, please check" # this is hardvcoded for now
-    all_times -= plasma_t_diff/2 # shift times by half interval to have plasma value at the middle of the interval
+    all_time -= int(plasma_t_diff/2) # shift times by half interval to have plasma value at the middle of the interval
 
     counts, bin_edges = np.histogram(all_plasma, bins=bin_num)
     plasma_idx = np.digitize(all_plasma, bin_edges, right=True) - 1 # -1 to make bins start at 0
@@ -181,12 +181,12 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
     sizes = BufferSizes.from_config(config)
     
     # Setup components
-    antenna_objs, channels = setup_antenna_objects(idxs, files, config)
+    antenna_objs, channels, channel_idxs = setup_antenna_objects(idxs, files, config)
     cupy_win_big, filt = setup_filters_and_windows(config, window, filt)
     
     # Initialize managers
     buffer_mgr = BufferManager(config, sizes)
-    ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, filt)
+    ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, channel_idxs, filt)
     missing_tracker = MissingDataTracker(nant, sizes.num_of_pfbs)
     
     # Setup frequency ranges
@@ -300,7 +300,7 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
     # vis = np.ma.masked_invalid(vis)
     freqs = np.arange(repfb_chanstart, repfb_chanend)
     
-    return vis, bin_count, t_chunk freqs, cupy_win_big, filt
+    return vis, bin_count, t_chunk, freqs, cupy_win_big, filt
 
 def main(plot_sz=None):
     config_fn = "visual_config.json"

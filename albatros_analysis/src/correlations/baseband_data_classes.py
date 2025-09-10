@@ -54,29 +54,34 @@ def fill_arr(specnum, spec_per_packet):
     if xp.__name__=='numpy': return fill_arr_cpu(specnum, spec_per_packet)
     elif xp.__name__=='cupy': return fill_arr_gpu(specnum,spec_per_packet)
 
-def make_continuous_gpu(spec, chan_specnum, start_specnum, channels, nspec, nchans=2049, out=None):
-    # print("chan specnum", chan_specnum)
-    # print("start specnum",start_specnum)
-    
+def make_continuous_gpu(spec, specnum, channels, nspec, nchans=2049, out=None):
+    if len(specnum)==nspec and len(channels)==nchans:
+        if out is not None:
+            out[:]=spec
+            return out #nothing to do if nothing's missing and all channels populated
+        else:
+            return spec
+    if out is None:
+        out=xp.zeros((nspec, nchans), dtype=spec.dtype)
+    out[xp.ix_(specnum,channels)] = spec[:len(specnum)]
+    # print("specnum is", specnum)
+    assert out.base is None
+    return out
 
+def make_continuous_gpu(spec, chan_specnum, start_specnum, channels, nspec, nchans=2049, out=None):
     specnum = xp.array(chan_specnum-start_specnum) % nspec 
     # No need for modulo using CUPY as it allows modular indexing. 
     # However numpy does not! so we hard code it.
 
-    if specnum.shape[0] == nspec and len(channels)==nchans:
+    if len(specnum)==nspec and len(channels)==nchans:
         if out is not None:
-            out[:] = spec
+            out[:]=spec
             return out #nothing to do if nothing's missing and all channels populated
         else:
             return spec
-    
     if out is None:
         out=xp.zeros((nspec, nchans), dtype=spec.dtype)
-
-    ix = xp.ix_(specnum,channels)
-    # print("out shape", out.shape)
-    # print(ix)
-    out[ix] = spec[:len(specnum)] # Here CUPY is doing Modular indexing!!!
+    out[xp.ix_(specnum,channels)] = spec[:len(specnum)]
     # print("specnum is", specnum)
     assert out.base is None
     return out

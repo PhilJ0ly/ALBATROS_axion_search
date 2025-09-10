@@ -164,13 +164,13 @@ class BufferManager:
 class IPFBProcessor:
     """Handles IPFB processing of chunks to time stream"""
     
-    def __init__(self, config: ProcessingConfig, buffer_mgr: BufferManager, channels: np.ndarray, filt: cp.ndarray):
+    def __init__(self, config: ProcessingConfig, buffer_mgr: BufferManager, channels: np.ndarray, channel_idxs: np.ndarray, filt: cp.ndarray):
         self.config = config
         self.channels = channels
+        self.channel_idxs = channel_idxs
         self.filt = filt
         self.buffers = buffer_mgr
         self.ts = cp.zeros(buffer_mgr.sizes.szblock, dtype='float32')
-        # self.time = cp.empty(buffer_mgr.sizes.szblock, dtype='float64')
     
     def process_chunk(self, chunk: dict, ant_idx: int, pol_idx: int, start_specnum: int):
         """Process a single chunk through inverse PFB"""
@@ -181,7 +181,7 @@ class IPFBProcessor:
             chunk[f"pol{pol_idx}"],
             chunk['specnums'],
             start_specnum,
-            self.channels[slice(None)],  # Use all channels
+            self.channels[self.channel_idxs],
             self.config.acclen,
             nchans=2049
         )
@@ -230,7 +230,8 @@ def setup_antenna_objects(idxs: List[int], files: List[str], config: ProcessingC
     
     # Get channel information from first antenna
     channels = np.asarray(antenna_objs[0].obj.channels, dtype='int64')
-    return antenna_objs, channels
+    channel_idxs = antenna_objs[0].obj.channel_idxs
+    return antenna_objs, channels, channel_idxs
 
 
 def setup_filters_and_windows(config: ProcessingConfig, cupy_win_big: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None) -> Tuple[cp.ndarray, cp.ndarray]:
@@ -263,7 +264,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         osamp: Oversampling factor for RePFB
         cut: Number of rows to cut from top and bottom of IPFB
         filt_thresh: Regularization parameter for IPFB deconvolution filter
-        cupy_win_big: Precomputed PFB window (optional)
+        window: Precomputed PFB window (optional)
         filt: Precomputed IPFB filter (optional)
         verbose: Enable verbose logging
     
@@ -271,7 +272,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         vis: Averaged cross-correlation matrix per time and frequency
         missing_fraction: Fraction of missing data per chunk and antenna
         freqs: Array of final frequency bins processed
-        cupy_win_big: PFB window used
+        window: PFB window used
         filt: IPFB filter used
     """
 
@@ -284,12 +285,13 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     sizes = BufferSizes.from_config(config)
     
     # Setup components
-    antenna_objs, channels = setup_antenna_objects(idxs, files, config)
-    cupy_win_big, filt = setup_filters_and_windows(config, cupy_win_big, filt)
+    antenna_objs, channels, channel_idxs = setup_antenna_objects(idxs, files, config)
+    window, filt = setup_filters_and_windows(config, window, filt)
     
+    assert config.chanstart == antenna_objs[0].obj.chanstart, "chan start issues"
     # Initialize managers
     buffer_mgr = BufferManager(config, sizes)
-    ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, filt)
+    ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, channel_idxs, filt)
     missing_tracker = MissingDataTracker(nant, sizes.num_of_pfbs)
     
     # Setup frequency ranges
@@ -335,7 +337,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                     output_start = ant_idx * config.nant + pol_idx # <-- still not sure
                     xin[output_start, :, :] = pu.cupy_pfb(
                         buffer_mgr.pfb_buf[ant_idx, pol_idx], 
-                        cupy_win_big,
+                        window,
                         nchan=2048 * osamp + 1, 
                         ntap=4
                     )[:, repfb_chanstart:repfb_chanend]
@@ -369,7 +371,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                 output_start = ant_idx * config.nant + pol_idx # <-- still not sure
                 xin[output_start, :, :] = pu.cupy_pfb(
                     buffer_mgr.pfb_buf[ant_idx, pol_idx], 
-                    cupy_win_big,
+                    window,
                     nchan=2048 * osamp + 1, 
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
@@ -388,7 +390,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     vis = np.ma.masked_invalid(vis)
     freqs = np.arange(repfb_chanstart, repfb_chanend)
     
-    return vis, missing_tracker.missing_fraction, freqs, cupy_win_big, filt
+    return vis, missing_tracker.missing_fraction, freqs, window, filt
 
 
 def _print_debug_info(config: ProcessingConfig, sizes: BufferSizes, buffer_mgr: BufferManager, n_job_chunks: int, nchunks: int):
