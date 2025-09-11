@@ -8,15 +8,15 @@
         }
     },
     "correlation": {
-        "osamp": 65536, 
+        "osamp": 64, 
         "acclen": 2048, 
         "nblock": 10,
-        "cut": 100,
-        "bin_num": 20
+        "cut": 10,
+        "bin_num": 4
     },
     "misc": {
         "out_dir": "/scratch/philj0ly/plasma_bin_data_09_04/",
-        "plasma_path": "/project/rrg-sievers/philj0ly/CHAIM/CSV/ECHAIM_nmf2.csv"
+        "plasma_path": "/project/rrg-sievers/philj0ly/CHAIM/CSV/ACHAIM_nmf2.csv"
     },
     "frequency": {
         "start_channel": 47, 

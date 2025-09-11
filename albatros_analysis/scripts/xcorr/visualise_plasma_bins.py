@@ -39,8 +39,10 @@ def get_plasma_data(plasma_path: str, obs_period: Tuple[int, int]) -> Tuple[np.n
     achaim["datetime_fmt"] = pd.to_datetime(achaim["datetime"], format="%y%m%d_%H%M%S")
     achaim["datetime"] = achaim["datetime_fmt"].astype('int')//10**9
     achaim = achaim[(achaim['datetime'] >= obs_period[0]) & (achaim['datetime'] <= obs_period[1])].copy()
+    
+    assert len(achaim)>0, f"No Data points from {pd.to_datetime(obs_period[0], unit='s')} to {pd.to_datetime(obs_period[1], unit='s')}"
     print(f"Loaded {len(achaim)} Plasma Data points from {pd.to_datetime(obs_period[0], unit='s')} to {pd.to_datetime(obs_period[1], unit='s')}")
-
+    
     achaim["plasma_freq"] = get_plasma_freq(achaim["nmf2"])
     plasma = achaim["plasma_freq"].to_numpy()
     time = achaim["datetime"].to_numpy() 
@@ -98,7 +100,7 @@ def get_plots(avg_data, mask, bin_edges, bin_counts, chans, t_chunk, osamp, widt
         scale = 'log'
 
     for i in avg_data:
-        I_stokes = (pols[0,0] + pols[1,1]).real.astype("float32") # <- to check
+        I_stokes = (pols[0,0] + pols[1,1]).real.astype("float32")
         total_time = bin_counts[i]*t_chunk
 
         plt.figure(figsize=(width, height))
@@ -140,10 +142,7 @@ def plot_from_data(data_path, width, height, outdir, log=False, all_stokes=False
     get_plots(avg_data, mask, bin_edges, bin_counts, chans, t_chunk, osamp, width, height, log=log, all_stokes=all_stokes)
 
 
-def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int, idxs: List[int], files: List[str], acclen: int,  nblock: int, 
-                   chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45,
-                   window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, 
-                   verbose: bool = False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, cp.ndarray, cp.ndarray]:
+def repfb_xcorr_bin_avg(time: List[int], plasma: List, bin_num: int, dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[np.ndarray, np.ndarray, np.ndarray, cp.ndarray, cp.ndarray]:
     """
     Perform oversampling PFB, GPU-based cross-correlation on streaming baseband data, and average over plasma frequency bins.
     
@@ -171,6 +170,11 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
         window: PFB window used
         filt: IPFB filter used
     """
+    init_t = time[0]
+    end_t = time[-1]
+    nchunks = int(np.floor((end_t-init_t)*250e6/4096/acclen))
+    # print(init_t, end_t)
+    idxs, files = get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents)
 
     # Setup configuration
     nant = len(idxs)
@@ -205,7 +209,7 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
     time_track = init_t
     cur_t_interval_idx = 0
     time_idx = np.array([[],[]])
-    t_chunk = 4096 * config.acclen / 250e6 # in seconds <-- check if correct
+    t_chunk = 4096 * config.acclen / 250e6 # in seconds <-- checked that this is correct
     bin_count = np.zeros(bin_num, dtype='int64')
 
     job_idx = 0
@@ -217,16 +221,8 @@ def repfb_xcorr_bin_avg(init_t: int, time: List[int], plasma: List, bin_num: int
         for ant_idx in range(config.nant):
             chunk = chunks[ant_idx]
             for pol_idx in range(config.npol):
-                ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnums[ant_idx])
-                
-        time_track += t_chunk
-        if cur_t_interval_idx < len(time)-1 and time_track > time[cur_t_interval_idx+1]: 
-            cur_t_interval_idx += 1
-        time_pfb_blocks_affected = ((buffer_mgr.pfb_idx[0, 0] + sizes.lchunk) // sizes.lblock) % config.nblock + 1
-        time_idx = np.append(time_idx, np.array([[cur_t_interval_idx],[time_pfb_blocks_affected]]), axis=1)
-        
+                ipfb_processor.process_chunk(chunk, ant_idx, pol_idx, start_specnums[ant_idx])        
 
-        # All PFB idices should be the same after processing all antennas
         assert (buffer_mgr.pfb_idx == buffer_mgr.pfb_idx[0,0]).all(), "The PFB idx are not equal across nant or npol"
 
         # We know that all antennas/pols have the same PFB index after processing so is sufficient to check one
@@ -338,9 +334,13 @@ def main(plot_sz=None):
     outdir = config["misc"]["out_dir"]
 
     obs_period = (1721342139+5*60, 1721449881) # Full observation period (+5min just for buffer times will be shifted back by 2.5min)
-    # obs_period = [1721342139+5*60, 1721376339] # First 'continuous' chunk of observation period
-    # obs_period = [1721376339+5*60, 1721449881] # Second 'continuous' chunk of observation period
+
+    obs_period = (1721342250+5*60, 1721368700) # First 'continuous' chunk of observation period
+    # Note that there are some holes in the albatros data towards the beginning
+    obs_period = (1721379700, 1721411900) # Second 'continuous' chunk of observation period
     # To do: get from json
+
+    obs_period = (1721379700, 1721379700+30*60) # 30 minute test
 
     all_time, all_plasma = get_plasma_data(plasma_path, obs_period)
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"))
@@ -351,10 +351,9 @@ def main(plot_sz=None):
         print(f"Processing continuous chunk {i+1}/{len(binned_time)} over {len(binned_time[i])*5} minutes")
         window, filt = None, None
         vis, bin_count, t_chunk, channels, window, filt = repfb_xcorr_bin_avg(
-            binned_time[i], binned_plasma[i], bin_num,
-            list(range(len(dir_parents))), dir_parents, acclen, nblock,
+            binned_time[i], binned_plasma[i], bin_num, dir_parents, spec_offsets, acclen, nblock,
             chanstart, chanend, osamp, cut=cut, filt_thresh=0.45,
-            window=window, filt=filt, verbose=False
+            window=window, filt=filt
         )
 
         bin_counts += bin_count

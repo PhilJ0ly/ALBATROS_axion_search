@@ -18,7 +18,7 @@
         "pfb_size_multiplier": 8
     },
     "frequency": {
-        "start_channel": 47, 
-        "end_channel": 51
+        "start_channel": 0, 
+        "end_channel": 5
     }
 }

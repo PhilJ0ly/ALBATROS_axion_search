@@ -10,7 +10,6 @@ of ALBATROS telescope data.
 
 import numpy as np
 import cupy as cp
-from albatros_analysis.src.utils import pfb_gpu_utils as pu
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 import ctypes
@@ -19,6 +18,7 @@ import sys
 from os import path
 sys.path.insert(0, path.expanduser("~"))
 
+from albatros_analysis.src.utils import pfb_gpu_utils as pu
 from albatros_analysis.src.correlations import baseband_data_classes as bdc
 from albatros_analysis.src.correlations import correlations as cr
 
@@ -170,7 +170,11 @@ class IPFBProcessor:
         self.channel_idxs = channel_idxs
         self.filt = filt
         self.buffers = buffer_mgr
-        self.ts = cp.zeros(buffer_mgr.sizes.szblock, dtype='float32')
+        # self.ts = cp.zeros(buffer_mgr.sizes.szblock, dtype='float32') this was for testing ts continuity
+
+        # to test the time count for visualise plasma bins
+        # self.t_chunk = 4096 * self.config.acclen / 250e6
+        # self.time_counter = 0.
     
     def process_chunk(self, chunk: dict, ant_idx: int, pol_idx: int, start_specnum: int):
         """Process a single chunk through inverse PFB"""
@@ -185,6 +189,8 @@ class IPFBProcessor:
             self.config.acclen,
             nchans=2049
         )
+        # if ant_idx ==0 and pol_idx ==0:
+        #     self.time_counter += self.t_chunk
         
         self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
 
@@ -308,7 +314,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         _print_debug_info(config, sizes, buffer_mgr, sizes.num_of_pfbs, nchunks)
     
     job_idx = 0
-
+    
     for i, chunks in enumerate(zip(*antenna_objs)):
         pfbed = False
 
@@ -389,6 +395,11 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     
     vis = np.ma.masked_invalid(vis)
     freqs = np.arange(repfb_chanstart, repfb_chanend)
+
+    # print(50*"=")
+    # print("IPFB time count", ipfb_processor.time_counter)
+    # print("nchunk x time chunk", nchunks*ipfb_processor.t_chunk)
+    # print("Actual time", )
     
     return vis, missing_tracker.missing_fraction, freqs, window, filt
 
