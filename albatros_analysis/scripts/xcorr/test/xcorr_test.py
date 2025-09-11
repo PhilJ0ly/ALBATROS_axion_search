@@ -2,6 +2,8 @@
 
 """
 This script is designed to test the new avg_xcorr_all_ant_gpu version that allows for split >1
+
+result: it works
 """
 
 import numpy as np
@@ -19,7 +21,7 @@ from albatros_analysis.src.correlations.correlations import avg_xcorr_all_ant_gp
 #     return cp.random.rand(nant*npol, nblock, nchan).astype('complex64')
 
 if __name__=="__main__":
-    nblocks = np.arange(5)
+    nblocks = np.arange(9)
 
     nant, npol = 1, 2
     nchan=4096*100
@@ -27,7 +29,7 @@ if __name__=="__main__":
     for i in range(nblocks.shape[0]):
         nblock = 2**nblocks[i]
     
-        xin = cp.random.rand(nant*npol, nblock, nchan).astype('complex64')
+        xin = (cp.random.rand(nant*npol, nblock, nchan)+1j*cp.random.rand(nant*npol, nblock, nchan)).astype('complex64')
 
         print(50*'=')
         print(nblock, "nblock")
@@ -42,4 +44,9 @@ if __name__=="__main__":
         outn = xcorr(xin, nant, npol, nblock, nchan, split=nblock, stay_split=True)
         print("xcorr split=nblock shape", outn.shape)
         print("xcorr and xcorr_og the same split=1", cp.allclose(out1, out_og))
+
+        idx = nblock//2
+        out_og_n = xcorr_og(xin[:,idx,:], nant, npol, 1, nchan, split=1)
+        print("xcorr and xcorr_og the same split=n and 1", cp.allclose(outn[:,:,:,idx], out_og_n))
+
 

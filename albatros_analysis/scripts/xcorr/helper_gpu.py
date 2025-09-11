@@ -61,6 +61,8 @@ class BufferSizes:
     lchunk: int  # Length of time stream chunk after IPFB
     nchan: int  # Number of channels after oversampling
     num_of_pfbs: int  # Number of PFBs to process in total
+    last_pfb_nblock: int # nblock for the final PFB
+    num_of_spectra: int # output number of spectra
     
     @classmethod
     def from_config(cls, config: ProcessingConfig) -> 'BufferSizes':
@@ -69,7 +71,16 @@ class BufferSizes:
         lchunk = 4096 * config.acclen
         nchan = (config.chanend - config.chanstart) * config.osamp
         num_of_pfbs = int(np.ceil((lchunk*config.nchunks-(config.ntap-1)*lblock)/(config.nblock*lblock)))
-        return cls(lblock, szblock, lchunk, nchan, num_of_pfbs)
+
+        extra = (lchunk*config.nchunks-(config.ntap-1)*lblock)%(config.nblock*lblock)
+        last_pfb_nblock = int(np.ceil(extra/lblock))
+        
+        if last_pfb_nblock == 0:
+            num_of_spectra = num_of_pfbs*config.nblock
+        else:
+            num_of_spectra = (num_of_pfbs-1)*config.nblock+last_pfb_nblock
+
+        return cls(lblock, szblock, lchunk, nchan, num_of_pfbs, last_pfb_nblock, num_of_spectra)
 
 
 class BufferManager:
@@ -306,7 +317,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     
     # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
-    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
+    vis = np.zeros((config.nant * config.npol, config.nant * config.npol, sizes.nchan, sizes.num_of_spectra), dtype="complex64", order="F")
     
     start_specnums = [ant.spec_num_start for ant in antenna_objs]
     
@@ -321,7 +332,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         for ant_idx in range(config.nant):
             chunk = chunks[ant_idx]
 
-            pfb_blocks_affected = ((buffer_mgr.pfb_idx[ant_idx, 0] + sizes.lchunk) // sizes.lblock) % config.nblock + 1
+            pfb_blocks_affected = ((buffer_mgr.pfb_idx[ant_idx, 0] + sizes.lchunk) // sizes.lblock) % nblock + 1
             missing_tracker.add_chunk_info(ant_idx, chunk, config.acclen, pfb_blocks_affected)
 
             for pol_idx in range(config.npol):
@@ -348,8 +359,8 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                         ntap=4
                     )[:, repfb_chanstart:repfb_chanend]
 
-            vis[:, :, :, job_idx] = cp.asnumpy(
-                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+            vis[:, :, :, job_idx*nblock:(job_idx+1)*nblock]= cp.asnumpy(
+                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=nblock, stay_split=True)
             )
             buffer_mgr.reset_overlap_region()
             for ant_idx in range(config.nant):
@@ -363,10 +374,13 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
             print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} s")
      # Pad buffer if incomplete
 
-    if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
+    blocks_left = max(0,np.ceil((buffer_mgr.pfb_idx[0,0]-(config.ntap - 1)* sizes.lblock)/sizes.lblock))
+    assert blocks_left == sizes.last_pfb_nblock, f"last_pfb_nblock wrong: expected {sizes.last_pfb_nblock} but got {blocks_left}"
+
+    if sizes.last_pfb_nblock:
 
         print(f"Job {job_idx + 1}: ")
-        print(f"Buffer not Full with only {buffer_mgr.pfb_idx[0,0]} < {sizes.szblock}")
+        print("Extra", buffer_mgr.pfb_idx[0,0] - (config.ntap-1+sizes.last_pfb_nblock-1)*sizes.lblock, "<=", sizes.lblock)
 
         for ant_idx in range(config.nant):
                 
@@ -375,15 +389,15 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
             for pol_idx in range(config.npol):
                 buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
                 output_start = ant_idx * config.nant + pol_idx # <-- still not sure
-                xin[output_start, :, :] = pu.cupy_pfb(
-                    buffer_mgr.pfb_buf[ant_idx, pol_idx], 
+                xin[output_start, :sizes.last_pfb_nblock, :] = pu.cupy_pfb(
+                    buffer_mgr.pfb_buf[ant_idx, pol_idx, :config.ntap-1+sizes.last_pfb_nblock], 
                     window,
                     nchan=2048 * osamp + 1, 
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
         
-        vis[:, :, :, job_idx] = cp.asnumpy(
-            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+        vis[:, :, :, job_idx*nblock:] = cp.asnumpy(
+            cr.avg_xcorr_all_ant_gpu(xin[:, :sizes.last_pfb_nblock], config.nant, config.npol, sizes.last_pfb_nblock, sizes.nchan, split=sizes.last_pfb_nblock, stay_split=True)
         )
 
         print("Paded and Processed Incomplete Buffer")

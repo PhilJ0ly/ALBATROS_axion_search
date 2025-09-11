@@ -31,7 +31,7 @@ def main():
         config_fn = sys.argv[1]  
     
     
-    outdir = "/scratch/philj0ly/test_08_18"
+    outdir = "/scratch/philj0ly/test_09_11"
     if len(sys.argv) > 2:
         outdir = sys.argv[2]  
     
@@ -74,8 +74,8 @@ def main():
     # To do: update time measure
     t1=time.time()
     pols,missing_fraction,channels, _, _ =repfb_xcorr_avg(idxs,files,ipfb_acclen,nchunks,nblock, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
-    print("Actual Time", end_t-init_t)
-    print(50*"=")
+    # print("Actual Time", end_t-init_t)
+    # print(50*"=")
     t2=time.time()
     
     print("Processing took", t2-t1, "s")
