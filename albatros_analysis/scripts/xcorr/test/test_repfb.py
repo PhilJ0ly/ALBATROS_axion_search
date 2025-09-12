@@ -18,9 +18,28 @@ from typing import List, Tuple, Optional
 
 from albatros_analysis.scripts.xcorr.helper_gpu import *
 
+from cupy.fft import rfft 
 # Have to uncomment self.ts = np.zeros in ipfb_processor for this to work
+def pfb_true(timestream, win, out=None, nchan=2049, ntap=4):
+    lblock = 2*(nchan-1)
+    nblock = timestream.size // lblock - (ntap - 1)
+    timestream=timestream.reshape(-1,lblock)
+    
+    if out is not None:
+        assert out.shape == (nblock, nchan)
+        
+    win=win.reshape(ntap,lblock)
+    
+    y = timestream[0:nblock] * win[0]
+    
+    # Accumulate remaining taps in-place
+    for i in range(1, ntap):
+        y += timestream[i:nblock+i] * win[i]
+        
+    out = rfft(y,axis=1)
+    return out
 
-def pfb_true(timestream,  window, nchan, ntap=4):
+def pfb_true_steve(timestream,  window, nchan, ntap=4):
     # old cpu pfb from Steve.
     # Slow but true.
 
@@ -86,6 +105,9 @@ def process_dummy_chunk(ipfb_processor, ant_idx: int, pol_idx: int, gen_type: st
         t0 = specs[0]
 
     if add_TS:
+        # offset = (ipfb_processor.config.ntap-1)*ipfb_processor.buffers.sizes.lblock
+        # print(ts.shape, ipfb_processor.ts.shape)
+        print(ipfb_processor.buffers.sizes.lchunk)
         ipfb_processor.ts[t0:t0+ipfb_processor.buffers.sizes.lchunk] = ts[:]
         print("Added to ts at", t0, t0+ipfb_processor.buffers.sizes.lchunk)
 
@@ -129,11 +151,11 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
     
     # Setup components
     cupy_win_big, _ = setup_filters_and_windows(config)
-    # cupy_win_big = cp.ones_like(cupy_win_big)  # Use rectangular window for testing
+    cupy_win_big = cp.ones_like(cupy_win_big)  # Use rectangular window for testing
     
     # Initialize managers
     buffer_mgr = BufferManager(config, sizes)
-    ipfb_processor = IPFBProcessor(config, buffer_mgr, None, None)
+    ipfb_processor = IPFBProcessor(config, buffer_mgr, None, None, None)
     
     # Setup frequency ranges
     repfb_chanstart = 0 * osamp
@@ -142,7 +164,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
 
     # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
-    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
+    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_spectra), dtype="complex64", order="F")
 
     print("Important Values:")
     print(f"nblock: {config.nblock}, lblock: {sizes.lblock}, szblock: {sizes.szblock}")
@@ -160,8 +182,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
                 print("sine t0", specs[gen_type][-1])
                 process_dummy_chunk(ipfb_processor, ant_idx, pol_idx, gen_type=gen_type, specs=specs[gen_type], add_TS=(ant_idx==0 and pol_idx==0))
 
-        if gen_type == 'sine':
-            specs[gen_type][-1] += sizes.lchunk  # Increment time step offset for sine wave
+        specs[gen_type][-1] += sizes.lchunk  # Increment time step offset for sine wave
 
         print('-'*20, ' ', i+1, '/', nchunks, '-'*20)
         print('PFB Buffer', buffer_mgr.pfb_idx)
@@ -188,11 +209,12 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
                         ntap=4
                     )[:, repfb_chanstart:repfb_chanend]
 
-            vis[:, :, :, job_idx] = cp.asnumpy(
-                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+            vis[:, :, :, job_idx*nblock:(job_idx+1)*nblock]= cp.asnumpy(
+                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=nblock, stay_split=True)
             )
-
-            buffer_mgr.reset_overlap_region()
+            # import time
+            # time.sleep(10)
+            buffer_mgr.reset_overlap_region(test_no_reset=(job_idx+1==sizes.num_of_pfbs))
             for ant_idx in range(config.nant):
                 for pol_idx in range(config.npol):
                     # Add remaining data to PFB buffer
@@ -209,38 +231,64 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
             print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} ")
     
     # Pad buffer if incomplete
-    if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
-        print(f"Job {job_idx + 1}/{sizes.num_of_pfbs}: ")
+
+    if sizes.last_pfb_nblock > 0:
+
+        print(f"Job {job_idx + 1}: ")
         print(f"Buffer not Full with only {buffer_mgr.pfb_idx[0,0]} < {sizes.szblock}")
+        print("Extra", buffer_mgr.pfb_idx[0,0] - (config.ntap-1+sizes.last_pfb_nblock-1)*sizes.lblock, "<=", sizes.lblock)
+
         for ant_idx in range(config.nant):
+                
+            # missing_tracker.calculate_job_average(ant_idx, job_idx)
+
             for pol_idx in range(config.npol):
                 buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
-                output_start = ant_idx * config.npol + pol_idx # <-- still not sure
-                xin[output_start, :, :] = pu.cupy_pfb(
-                    buffer_mgr.pfb_buf[ant_idx, pol_idx], 
+                output_start = ant_idx * config.npol + pol_idx 
+                xin[output_start, :sizes.last_pfb_nblock, :] = pu.cupy_pfb(
+                    buffer_mgr.pfb_buf[ant_idx, pol_idx, :config.ntap-1+sizes.last_pfb_nblock], 
                     cupy_win_big,
                     nchan=2048 * osamp + 1, 
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
-
-        vis[:, :, :, job_idx] = cp.asnumpy(
-            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+        
+        vis[:, :, :, job_idx*nblock:] = cp.asnumpy(
+            cr.avg_xcorr_all_ant_gpu(xin[:, :sizes.last_pfb_nblock], config.nant, config.npol, sizes.last_pfb_nblock, sizes.nchan, split=sizes.last_pfb_nblock, stay_split=True)
         )
-        print("PFB buffer padded and processed")
+
+        print("Paded and Processed Incomplete Buffer")
     
     vis = np.ma.masked_invalid(vis)
 
     true_out = pfb_true(ipfb_processor.ts, cupy_win_big, nchan=(2048*config.osamp+1), ntap=4)[:, repfb_chanstart:repfb_chanend]
-    xin_true = cp.empty((config.nant * config.npol, nblock, true_out.shape[-1]), dtype='complex64', order='F')
+    xin_true = cp.empty((config.nant * config.npol, sizes.num_of_spectra, true_out.shape[-1]), dtype='complex64', order='F')
     xin_true[:] = cp.asarray(true_out)
-    vis_true = np.empty((config.nant * config.npol, nant * config.npol, true_out.shape[-1], 1), dtype="complex64", order="F")
-    vis_true[:, :, :, 0] = cp.asnumpy(
-        cr.avg_xcorr_all_ant_gpu(xin_true, config.nant, config.npol, nblock, true_out.shape[-1], split=1)
+
+    print("xin the same", cp.allclose(xin, xin_true[:,-nblock:,:]))
+    # print("xin the same (only works if only 1 PFB)", np.allclose(xin, xin_true))
+    # diff0 = np.abs(xin-xin_true)
+    # print(np.mean(diff0, axis=2))
+
+    vis_true = np.empty((config.nant * config.npol, nant * config.npol, true_out.shape[-1], sizes.num_of_spectra), dtype="complex64", order="F")
+    vis_true = cp.asnumpy(
+        cr.avg_xcorr_all_ant_gpu(xin_true, config.nant, config.npol, sizes.num_of_spectra, true_out.shape[-1], split=sizes.num_of_spectra, stay_split=True)
     )
     vis_true = np.ma.masked_invalid(vis_true)
     print("pfb_buf, ts shape", buffer_mgr.pfb_buf.shape, ipfb_processor.ts.shape)
+
     print("xin, xin_true shape", xin.shape, xin_true.shape)
     print(vis.shape, vis_true.shape, "vis, vis_true shapes")
+    print("vis same as vis_true", np.allclose(vis, vis_true))
+    diff = np.abs(vis-vis_true)
+    print(np.mean(diff, axis=2))
+
+    # print("diff b/w the 2", np.mean(diff), np.std(diff))
+    print("time array the same", cp.allclose(buffer_mgr.pfb_buf[0,0].flatten(), ipfb_processor.ts[-sizes.szblock:]))
+    # print("time array the same (only works if only 1 PFB)", cp.allclose(buffer_mgr.pfb_buf[0,0].flatten(), ipfb_processor.ts))
+    # diff2 = np.abs(buffer_mgr.pfb_buf[0,0]-ipfb_processor.ts.reshape(buffer_mgr.pfb_buf[0,0].shape))
+    # print(np.mean(diff2, axis=1))
+    # print("diff b/w the 2", np.mean(diff2), np.std(diff2))
+
     # checked that the timestreams are the same.
     # same =(ipfb_processor.ts == buffer_mgr.pfb_buf[0,0].ravel())
     # same = same.reshape(config.nblock+(config.ntap-1), sizes.lblock)
@@ -248,26 +296,26 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
     # for i in range(same.shape[0]):
     #     print("ts the same %", i, np.mean(same[i])*100, np.mean(ipfb_processor.ts[i*sizes.lblock:(i+1)*sizes.lblock]), np.mean(buffer_mgr.pfb_buf[0,0,i,:]))
 
-    print("window", cupy_win_big.shape)
-    
+    # print("window", cupy_win_big.shape)
+    sys.exit()
     return vis, vis_true
 
 
 if __name__=="__main__":
 
-    outdir = "/scratch/philj0ly/test_08_25"
+    outdir = "/scratch/philj0ly/test_09_11"
 
     print("Beginning Testing...\n")
 
-    acclen = 1792
-    nchunks = 24
+    acclen = 11*1024
+    nchunks = 1
     osamp = 1024
     cut = 19
-    nblock = 39
+    nblock = 4
     nant = 1
     gen_types = ['constant', 'uniform', 'gaussian', 'sine']
     # gen_type = 'uniform'  # Options: 'constant', 'uniform',  'gaussian', 'sine'
-    # gen_types=['sine']
+    gen_types=['constant']
 
     for gen_type in gen_types: 
         print("\n", 50*"~")
@@ -275,7 +323,7 @@ if __name__=="__main__":
         print(50*"~")     
         pols, true_out =repfb_test(acclen,nchunks,nblock, osamp, nant=1, cut=cut,filt_thresh=0, gen_type=gen_type)
 
-        fname = f"test_{gen_type}_{str(acclen)}_{str(osamp)}.npz"
+        fname = f"test_{gen_type}__{nblock}_{str(acclen)}_{str(osamp)}.npz"
         fpath = path.join(outdir,fname)
         np.savez(fpath,data=pols.data,mask=pols.mask, true_data=true_out, true_mask=true_out.mask)
 

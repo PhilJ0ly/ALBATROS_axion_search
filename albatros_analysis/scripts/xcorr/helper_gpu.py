@@ -100,10 +100,11 @@ class BufferManager:
         self.rem_idx = np.zeros((config.nant, config.npol), dtype=np.uint64)
         self.pfb_idx = np.zeros((config.nant, config.npol), dtype=np.uint64)
     
-    def reset_overlap_region(self):
+    def reset_overlap_region(self, test_no_reset=False):
         """Set up overlap region for continuity between iterations"""
         ntap = self.config.ntap
-        self.pfb_buf[:, :, :ntap-1, :] = self.pfb_buf[:, :, -(ntap-1):, :].copy()
+        if not test_no_reset:
+            self.pfb_buf[:, :, :ntap-1, :] = self.pfb_buf[:, :, -(ntap-1):, :].copy()
         self.pfb_idx[:, :] = (ntap - 1) * self.sizes.lblock
     
     def add_remaining_to_pfb_buffer(self, ant_idx: int, pol_idx: int):
@@ -181,8 +182,8 @@ class IPFBProcessor:
         self.channel_idxs = channel_idxs
         self.filt = filt
         self.buffers = buffer_mgr
-        # self.ts = cp.zeros(buffer_mgr.sizes.szblock, dtype='float32') this was for testing ts continuity
-
+        self.ts = cp.zeros(buffer_mgr.sizes.lblock*(buffer_mgr.sizes.num_of_spectra+buffer_mgr.config.ntap-1), dtype='float32') # this was for testing ts continuity
+        print(buffer_mgr.sizes.num_of_spectra)
         # to test the time count for visualise plasma bins
         # self.t_chunk = 4096 * self.config.acclen / 250e6
         # self.time_counter = 0.
@@ -351,7 +352,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                 missing_tracker.calculate_job_average(ant_idx, job_idx)
 
                 for pol_idx in range(config.npol):
-                    output_start = ant_idx * config.nant + pol_idx # <-- still not sure
+                    output_start = ant_idx * config.npol + pol_idx # <-- still not sure
                     xin[output_start, :, :] = pu.cupy_pfb(
                         buffer_mgr.pfb_buf[ant_idx, pol_idx], 
                         window,
@@ -377,7 +378,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     blocks_left = max(0,np.ceil((buffer_mgr.pfb_idx[0,0]-(config.ntap - 1)* sizes.lblock)/sizes.lblock))
     assert blocks_left == sizes.last_pfb_nblock, f"last_pfb_nblock wrong: expected {sizes.last_pfb_nblock} but got {blocks_left}"
 
-    if sizes.last_pfb_nblock:
+    if sizes.last_pfb_nblock > 0:
 
         print(f"Job {job_idx + 1}: ")
         print("Extra", buffer_mgr.pfb_idx[0,0] - (config.ntap-1+sizes.last_pfb_nblock-1)*sizes.lblock, "<=", sizes.lblock)
@@ -388,7 +389,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
 
             for pol_idx in range(config.npol):
                 buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
-                output_start = ant_idx * config.nant + pol_idx # <-- still not sure
+                output_start = ant_idx * config.npol + pol_idx 
                 xin[output_start, :sizes.last_pfb_nblock, :] = pu.cupy_pfb(
                     buffer_mgr.pfb_buf[ant_idx, pol_idx, :config.ntap-1+sizes.last_pfb_nblock], 
                     window,
