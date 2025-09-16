@@ -83,6 +83,10 @@ def process_dummy_chunk(ipfb_processor, ant_idx: int, pol_idx: int, gen_type: st
         # specs = (value,t0)
         t0 = specs[1]
         ts = cp.ones(ipfb_processor.buffers.sizes.lchunk, dtype='float32') * specs[0]
+    elif gen_type == 'random':
+        # specs = (t0)
+        t0 = specs[0]
+        ts = cp.random.rand(ipfb_processor.buffers.sizes.lchunk).astype('float32')
     elif gen_type == 'uniform':
         # specs = (min, max,t0)
         t0 = specs[2]
@@ -136,6 +140,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
 
     specs = {
         'constant': [4.0, 0.0], # value, t0
+        'random': [0.0], # t0
         'uniform': [0.0, 2.0, 0.0], # min, max, t0
         'gaussian': [0.0, 2.0, 0.0], # mean, stddev, t0
         'sine': [6169.08, sr, 4.0, 0.0]  # frequency, sample_rate, amp, t0
@@ -164,7 +169,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
 
     # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
-    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_spectra), dtype="complex64", order="F")
+    vis = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
 
     print("Important Values:")
     print(f"nblock: {config.nblock}, lblock: {sizes.lblock}, szblock: {sizes.szblock}")
@@ -193,6 +198,9 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
         assert (buffer_mgr.pfb_idx == buffer_mgr.pfb_idx[0,0]).all()
 
         # We know that all antennas/pols have the same PFB index after processing so is sufficient to check one
+        pfb_out = None
+        xin_prev = None
+        vis_prev = None
         while buffer_mgr.pfb_idx[0,0] == sizes.szblock:
 
             print('='*20, 'PFB Buffer Full', '='*20)
@@ -202,6 +210,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
             for ant_idx in range(config.nant):
                 for pol_idx in range(config.npol):
                     output_start = ant_idx * config.npol + pol_idx # <-- still not sure
+                    print("mean std", ant_idx, pol_idx, cp.mean(buffer_mgr.pfb_buf[ant_idx, pol_idx]), cp.std(buffer_mgr.pfb_buf[ant_idx, pol_idx]))
                     xin[output_start, :, :] = pu.cupy_pfb(
                         buffer_mgr.pfb_buf[ant_idx, pol_idx], 
                         cupy_win_big,
@@ -209,9 +218,29 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
                         ntap=4
                     )[:, repfb_chanstart:repfb_chanend]
 
-            vis[:, :, :, job_idx*nblock:(job_idx+1)*nblock]= cp.asnumpy(
-                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=nblock, stay_split=True)
+                    outish = pu.cupy_pfb(
+                        buffer_mgr.pfb_buf[ant_idx, pol_idx], 
+                        cupy_win_big,
+                        nchan=2048 * osamp + 1, 
+                        ntap=4
+                    )
+                    if pfb_out is not None:
+                        print("pfb out same",ant_idx, pol_idx, cp.allclose(outish,  pfb_out))
+                    pfb_out = outish
+            print("xin mean std", cp.mean(xin), cp.std(xin))
+            if xin_prev is not None:
+                print("xin always same", cp.allclose(xin, xin_prev)) 
+                # xin = xin_prev
+            print(job_idx*nblock,(job_idx+1)*nblock, "vis idx")
+            xin_prev = xin
+            vis[:, :, :, job_idx]= cp.asnumpy(
+                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
             )
+
+            visish = cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+            if vis_prev is not None:
+                print("vis always the same", cp.allclose(vis_prev, visish))
+            vis_prev = visish
             # import time
             # time.sleep(10)
             buffer_mgr.reset_overlap_region(test_no_reset=(job_idx+1==sizes.num_of_pfbs))
@@ -232,11 +261,10 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
     
     # Pad buffer if incomplete
 
-    if sizes.last_pfb_nblock > 0:
+    if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
 
         print(f"Job {job_idx + 1}: ")
         print(f"Buffer not Full with only {buffer_mgr.pfb_idx[0,0]} < {sizes.szblock}")
-        print("Extra", buffer_mgr.pfb_idx[0,0] - (config.ntap-1+sizes.last_pfb_nblock-1)*sizes.lblock, "<=", sizes.lblock)
 
         for ant_idx in range(config.nant):
                 
@@ -245,15 +273,15 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
             for pol_idx in range(config.npol):
                 buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
                 output_start = ant_idx * config.npol + pol_idx 
-                xin[output_start, :sizes.last_pfb_nblock, :] = pu.cupy_pfb(
-                    buffer_mgr.pfb_buf[ant_idx, pol_idx, :config.ntap-1+sizes.last_pfb_nblock], 
+                xin[output_start, :, :] = pu.cupy_pfb(
+                    buffer_mgr.pfb_buf[ant_idx, pol_idx], 
                     cupy_win_big,
                     nchan=2048 * osamp + 1, 
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
         
-        vis[:, :, :, job_idx*nblock:] = cp.asnumpy(
-            cr.avg_xcorr_all_ant_gpu(xin[:, :sizes.last_pfb_nblock], config.nant, config.npol, sizes.last_pfb_nblock, sizes.nchan, split=sizes.last_pfb_nblock, stay_split=True)
+        vis[:, :, :, job_idx] = cp.asnumpy(
+            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, sizes.last_pfb_nblock, sizes.nchan, split=1)
         )
 
         print("Paded and Processed Incomplete Buffer")
@@ -261,44 +289,30 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
     vis = np.ma.masked_invalid(vis)
 
     true_out = pfb_true(ipfb_processor.ts, cupy_win_big, nchan=(2048*config.osamp+1), ntap=4)[:, repfb_chanstart:repfb_chanend]
-    xin_true = cp.empty((config.nant * config.npol, sizes.num_of_spectra, true_out.shape[-1]), dtype='complex64', order='F')
-    xin_true[:] = cp.asarray(true_out)
+    xin_true = cp.empty((config.nant * config.npol, nblock*sizes.num_of_pfbs, sizes.nchan), dtype='complex64', order='F')
+    xin_true[:] = true_out
 
-    print("xin the same", cp.allclose(xin, xin_true[:,-nblock:,:]))
-    # print("xin the same (only works if only 1 PFB)", np.allclose(xin, xin_true))
-    # diff0 = np.abs(xin-xin_true)
-    # print(np.mean(diff0, axis=2))
+    vis_true = np.zeros((config.nant * config.npol, nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
 
-    vis_true = np.empty((config.nant * config.npol, nant * config.npol, true_out.shape[-1], sizes.num_of_spectra), dtype="complex64", order="F")
-    vis_true = cp.asnumpy(
-        cr.avg_xcorr_all_ant_gpu(xin_true, config.nant, config.npol, sizes.num_of_spectra, true_out.shape[-1], split=sizes.num_of_spectra, stay_split=True)
-    )
+    for job_idx in range(sizes.num_of_pfbs):
+        vis_true[:, :, :, job_idx]= cp.asnumpy(
+            cr.avg_xcorr_all_ant_gpu(cp.asfortranarray(xin_true[:, job_idx*nblock:(job_idx+1)*nblock, :]), config.nant, config.npol, nblock, sizes.nchan, split=1)
+        )
+        
+
     vis_true = np.ma.masked_invalid(vis_true)
-    print("pfb_buf, ts shape", buffer_mgr.pfb_buf.shape, ipfb_processor.ts.shape)
-
-    print("xin, xin_true shape", xin.shape, xin_true.shape)
-    print(vis.shape, vis_true.shape, "vis, vis_true shapes")
+    # print("pfb_buf, ts shape", buffer_mgr.pfb_buf.shape, ipfb_processor.ts.shape)
+    # print("xin, xin_true shape", xin.shape, xin_true.shape)
+    # print("vis, vis_true shapes", vis.shape, vis_true.shape)
+    print("time array the same", cp.allclose(buffer_mgr.pfb_buf[0,0].flatten(), ipfb_processor.ts[-sizes.szblock:]))
     print("vis same as vis_true", np.allclose(vis, vis_true))
+    same = np.allclose(vis, vis_true)
     diff = np.abs(vis-vis_true)
     print(np.mean(diff, axis=2))
 
-    # print("diff b/w the 2", np.mean(diff), np.std(diff))
-    print("time array the same", cp.allclose(buffer_mgr.pfb_buf[0,0].flatten(), ipfb_processor.ts[-sizes.szblock:]))
-    # print("time array the same (only works if only 1 PFB)", cp.allclose(buffer_mgr.pfb_buf[0,0].flatten(), ipfb_processor.ts))
-    # diff2 = np.abs(buffer_mgr.pfb_buf[0,0]-ipfb_processor.ts.reshape(buffer_mgr.pfb_buf[0,0].shape))
-    # print(np.mean(diff2, axis=1))
-    # print("diff b/w the 2", np.mean(diff2), np.std(diff2))
 
-    # checked that the timestreams are the same.
-    # same =(ipfb_processor.ts == buffer_mgr.pfb_buf[0,0].ravel())
-    # same = same.reshape(config.nblock+(config.ntap-1), sizes.lblock)
-    # print("ts the same", same.all())
-    # for i in range(same.shape[0]):
-    #     print("ts the same %", i, np.mean(same[i])*100, np.mean(ipfb_processor.ts[i*sizes.lblock:(i+1)*sizes.lblock]), np.mean(buffer_mgr.pfb_buf[0,0,i,:]))
-
-    # print("window", cupy_win_big.shape)
-    sys.exit()
-    return vis, vis_true
+    # sys.exit()
+    return vis, vis_true, same
 
 
 if __name__=="__main__":
@@ -313,19 +327,22 @@ if __name__=="__main__":
     cut = 19
     nblock = 4
     nant = 1
-    gen_types = ['constant', 'uniform', 'gaussian', 'sine']
+    gen_types = ['constant', 'uniform', 'gaussian', 'sine', 'random']
     # gen_type = 'uniform'  # Options: 'constant', 'uniform',  'gaussian', 'sine'
-    gen_types=['constant']
-
+    # gen_types=['constant']
+    success = []
     for gen_type in gen_types: 
         print("\n", 50*"~")
         print(f"Testing gen_type: {gen_type}")
         print(50*"~")     
-        pols, true_out =repfb_test(acclen,nchunks,nblock, osamp, nant=1, cut=cut,filt_thresh=0, gen_type=gen_type)
-
+        pols, true_out, same =repfb_test(acclen,nchunks,nblock, osamp, nant=1, cut=cut,filt_thresh=0, gen_type=gen_type)
+        success.append(same)
         fname = f"test_{gen_type}__{nblock}_{str(acclen)}_{str(osamp)}.npz"
         fpath = path.join(outdir,fname)
-        np.savez(fpath,data=pols.data,mask=pols.mask, true_data=true_out, true_mask=true_out.mask)
+        # np.savez(fpath,data=pols.data,mask=pols.mask, true_data=true_out, true_mask=true_out.mask)
 
         print("\nSaved with an oversampling rate of", osamp, "and an acclen of", acclen, "at")
         print(fpath)
+
+    for i, gen_type in enumerate(gen_types):
+        print(gen_type, success[i])

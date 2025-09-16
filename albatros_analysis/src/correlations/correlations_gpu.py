@@ -19,7 +19,46 @@ lib.cgemm_strided_batched.argtypes = [
 lib.cgemm_strided_batched.restype = None
 
 
-def avg_xcorr_all_ant_gpu(x: xp.ndarray, nant: int, npol: int, ntime: int, nfreq: int, split: int = 1, stay_split=False, scratch=None, out=None):
+def avg_xcorr_all_ant_gpu(x: xp.ndarray, nant: int,npol: int, ntime: int, nfreq: int, split : int = 1, scratch = None, out=None):
+    #sgemm/cgemm callsign (m,n,k, ldA, strideA, ldB, strideB, ldC, strideC, nbatch)
+    #A = m x k  | B = n x k  | C = m x n when B transpose enabled
+    M=nant*npol
+    N=M
+    K=ntime
+    if(K%split!=0):
+        raise ValueError("split should be a divisor of ntime")
+    batchCount=nfreq*split
+
+    if out is None:
+        if split >  1:    
+            out = xp.empty((M,N,nfreq, split),dtype='complex64',order='F')
+        else:
+            out = xp.empty((M,N,nfreq),dtype='complex64',order='F')
+    elif (
+        (split==1 and out.shape != (M, M, nfreq))
+        or (split>1 and out.shape != (M, M, nfreq, split))
+        or out.dtype != x.dtype 
+        or not out.flags.f_contiguous
+        ):
+        raise ValueError("invalid out buffer")
+
+    if split > 1:
+        raise NotImplementedError() #do a proper buffered solution later.
+        # scratch.reshape(m,n,split,nbatch,order='F').sum(axis=2,out=out) #reduce along split time axis
+        # print("reduced out", out.flags, out.shape)
+    else:
+        lib.cgemm_strided_batched(
+            ctypes.c_void_p(x.data.ptr),
+            ctypes.c_void_p(x.data.ptr),
+            ctypes.c_void_p(out.data.ptr),
+            M, N, K//split, batchCount
+        )
+        out/=K
+    return out
+
+
+# use this for testing the PFB pipeline (still has some issues)
+def avg_xcorr_all_ant_gpu_split(x: xp.ndarray, nant: int, npol: int, ntime: int, nfreq: int, split: int = 1, stay_split=False, scratch=None, out=None):
     #sgemm/cgemm callsign (m,n,k, ldA, strideA, ldB, strideB, ldC, strideC, nbatch)
     #A = m x k  | B = n x k  | C = m x n when B transpose enabled
     M = nant * npol
@@ -60,24 +99,29 @@ def avg_xcorr_all_ant_gpu(x: xp.ndarray, nant: int, npol: int, ntime: int, nfreq
             # Extract time chunk for this split
             start_time = i * K_chunk
             end_time = (i + 1) * K_chunk
-            x_chunk = x[:, start_time:end_time, :]  # Shape: (M, 1, K_chunk, nfreq)
-            
-            # Perform batched matrix multiplication for this chunk
-            # scratch[:, :, :, i] will store results for this time chunk
-            if stay_split:
-                scratch_slice = out[:, :, :, i]
-            else:
-                scratch_slice = scratch[:, :, :, i]
-            
+
+            x_chunk = x[:, start_time:end_time, :]  # Shape: (M, K_chunk, nfreq)
+            x_chunk_reshaped = x_chunk.transpose(2, 0, 1)  # Shape: (nfreq, M, K_chunk)
+
+            # Similarly reshape scratch_slice
+            scratch_slice_reshaped = xp.empty((nfreq, M, N), dtype = out.dtype)
+            # scratch_slice_reshaped = scratch_slice.transpose(2, 0, 1)  # Shape: (nfreq, M, N)
+
             lib.cgemm_strided_batched(
-                ctypes.c_void_p(x_chunk.data.ptr),
-                ctypes.c_void_p(x_chunk.data.ptr),
-                ctypes.c_void_p(scratch_slice.data.ptr),
+                ctypes.c_void_p(x_chunk_reshaped.data.ptr),
+                ctypes.c_void_p(x_chunk_reshaped.data.ptr),
+                ctypes.c_void_p(scratch_slice_reshaped.data.ptr),
                 M, N, K_chunk, nfreq
             )
             
             # Normalize by chunk size
-            scratch_slice /= K_chunk
+            scratch_slice_reshaped /= K_chunk
+
+            # scratch[:, :, :, i] will store results for this time chunk
+            if stay_split:
+                out[:, :, :, i] = scratch_slice_reshaped.transpose(1, 2, 0)
+            else:
+                scratch[:, :, :, i] = scratch_slice_reshaped.transpose(1, 2, 0)
         
         if not stay_split:
             # Average across splits (time chunks)
@@ -91,41 +135,4 @@ def avg_xcorr_all_ant_gpu(x: xp.ndarray, nant: int, npol: int, ntime: int, nfreq
         )
         out /= K
     
-    return out
-
-def avg_xcorr_all_ant_gpu_og(x: xp.ndarray, nant: int,npol: int, ntime: int, nfreq: int, split : int = 1, scratch = None, out=None):
-    #sgemm/cgemm callsign (m,n,k, ldA, strideA, ldB, strideB, ldC, strideC, nbatch)
-    #A = m x k  | B = n x k  | C = m x n when B transpose enabled
-    M=nant*npol
-    N=M
-    K=ntime
-    if(K%split!=0):
-        raise ValueError("split should be a divisor of ntime")
-    batchCount=nfreq*split
-
-    if out is None:
-        if split >  1:    
-            out = xp.empty((M,N,nfreq, split),dtype='complex64',order='F')
-        else:
-            out = xp.empty((M,N,nfreq),dtype='complex64',order='F')
-    elif (
-        (split==1 and out.shape != (M, M, nfreq))
-        or (split>1 and out.shape != (M, M, nfreq, split))
-        or out.dtype != x.dtype 
-        or not out.flags.f_contiguous
-        ):
-        raise ValueError("invalid out buffer")
-
-    if split > 1:
-        raise NotImplementedError() #do a proper buffered solution later.
-        # scratch.reshape(m,n,split,nbatch,order='F').sum(axis=2,out=out) #reduce along split time axis
-        # print("reduced out", out.flags, out.shape)
-    else:
-        lib.cgemm_strided_batched(
-            ctypes.c_void_p(x.data.ptr),
-            ctypes.c_void_p(x.data.ptr),
-            ctypes.c_void_p(out.data.ptr),
-            M, N, K//split, batchCount
-        )
-        out/=K
     return out

@@ -182,8 +182,9 @@ class IPFBProcessor:
         self.channel_idxs = channel_idxs
         self.filt = filt
         self.buffers = buffer_mgr
-        self.ts = cp.zeros(buffer_mgr.sizes.lblock*(buffer_mgr.sizes.num_of_spectra+buffer_mgr.config.ntap-1), dtype='float32') # this was for testing ts continuity
-        print(buffer_mgr.sizes.num_of_spectra)
+        
+        self.ts = cp.zeros(buffer_mgr.sizes.lblock*(buffer_mgr.sizes.num_of_pfbs*config.nblock+config.ntap-1), dtype='float32') # this was for testing ts continuity
+        # print(buffer_mgr.sizes.num_of_spectra)
         # to test the time count for visualise plasma bins
         # self.t_chunk = 4096 * self.config.acclen / 250e6
         # self.time_counter = 0.
@@ -318,7 +319,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     
     # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
-    vis = np.zeros((config.nant * config.npol, config.nant * config.npol, sizes.nchan, sizes.num_of_spectra), dtype="complex64", order="F")
+    vis = np.zeros((config.nant * config.npol, config.nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
     
     start_specnums = [ant.spec_num_start for ant in antenna_objs]
     
@@ -360,8 +361,8 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                         ntap=4
                     )[:, repfb_chanstart:repfb_chanend]
 
-            vis[:, :, :, job_idx*nblock:(job_idx+1)*nblock]= cp.asnumpy(
-                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=nblock, stay_split=True)
+            vis[:, :, :, job_idx]= cp.asnumpy(
+                cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
             )
             buffer_mgr.reset_overlap_region()
             for ant_idx in range(config.nant):
@@ -378,10 +379,10 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     blocks_left = max(0,np.ceil((buffer_mgr.pfb_idx[0,0]-(config.ntap - 1)* sizes.lblock)/sizes.lblock))
     assert blocks_left == sizes.last_pfb_nblock, f"last_pfb_nblock wrong: expected {sizes.last_pfb_nblock} but got {blocks_left}"
 
-    if sizes.last_pfb_nblock > 0:
+    if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
 
         print(f"Job {job_idx + 1}: ")
-        print("Extra", buffer_mgr.pfb_idx[0,0] - (config.ntap-1+sizes.last_pfb_nblock-1)*sizes.lblock, "<=", sizes.lblock)
+        # print("Extra", buffer_mgr.pfb_idx[0,0] - (config.ntap-1+sizes.last_pfb_nblock-1)*sizes.lblock, "<=", sizes.lblock)
 
         for ant_idx in range(config.nant):
                 
@@ -390,15 +391,15 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
             for pol_idx in range(config.npol):
                 buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
                 output_start = ant_idx * config.npol + pol_idx 
-                xin[output_start, :sizes.last_pfb_nblock, :] = pu.cupy_pfb(
-                    buffer_mgr.pfb_buf[ant_idx, pol_idx, :config.ntap-1+sizes.last_pfb_nblock], 
+                xin[output_start, :, :] = pu.cupy_pfb(
+                    buffer_mgr.pfb_buf[ant_idx, pol_idx], 
                     window,
                     nchan=2048 * osamp + 1, 
                     ntap=4
                 )[:, repfb_chanstart:repfb_chanend]
         
-        vis[:, :, :, job_idx*nblock:] = cp.asnumpy(
-            cr.avg_xcorr_all_ant_gpu(xin[:, :sizes.last_pfb_nblock], config.nant, config.npol, sizes.last_pfb_nblock, sizes.nchan, split=sizes.last_pfb_nblock, stay_split=True)
+        vis[:, :, :, job_idx] = cp.asnumpy(
+            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, sizes.last_pfb_nblock, sizes.nchan, split=sizes.last_pfb_nblock, stay_split=True)
         )
 
         print("Paded and Processed Incomplete Buffer")
