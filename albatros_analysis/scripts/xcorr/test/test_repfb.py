@@ -76,7 +76,7 @@ def pfb_true_steve(timestream,  window, nchan, ntap=4):
 
     return spec
 
-def process_dummy_chunk(ipfb_processor, ant_idx: int, pol_idx: int, gen_type: str='constant', specs: list = None, add_TS: bool = False):
+def process_dummy_chunk(ipfb_processor, specs: List, gen_type: str='constant'):
     ts = cp.zeros(ipfb_processor.buffers.sizes.lchunk, dtype='float32')
 
     if gen_type =='constant':
@@ -108,14 +108,16 @@ def process_dummy_chunk(ipfb_processor, ant_idx: int, pol_idx: int, gen_type: st
         ts = cp.zeros(ipfb_processor.buffers.sizes.lchunk, dtype='float32')
         t0 = specs[0]
 
-    if add_TS:
-        # offset = (ipfb_processor.config.ntap-1)*ipfb_processor.buffers.sizes.lblock
-        # print(ts.shape, ipfb_processor.ts.shape)
-        print(ipfb_processor.buffers.sizes.lchunk)
-        ipfb_processor.ts[t0:t0+ipfb_processor.buffers.sizes.lchunk] = ts[:]
-        print("Added to ts at", t0, t0+ipfb_processor.buffers.sizes.lchunk)
+    # if add_TS:
+    #     # offset = (ipfb_processor.config.ntap-1)*ipfb_processor.buffers.sizes.lblock
+    #     # print(ts.shape, ipfb_processor.ts.shape)
+    #     # print(ipfb_processor.buffers.sizes.lchunk)
+    ipfb_processor.ts[t0:t0+ipfb_processor.buffers.sizes.lchunk] = ts[:]
+    print("Added to ts at", t0, t0+ipfb_processor.buffers.sizes.lchunk)
 
-    ipfb_processor.buffers.add_chunk_to_buffer(ant_idx, pol_idx, ts)
+    for ant_idx in range(ipfb_processor.config.nant):
+        for pol_idx in range(ipfb_processor.config.npol):
+            ipfb_processor.buffers.add_chunk_to_buffer(ant_idx, pol_idx, ts)
 
 
 
@@ -182,10 +184,10 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
     job_idx = 0
     for i in range(nchunks):
 
-        for ant_idx in range(config.nant):
-            for pol_idx in range(config.npol):
-                print("sine t0", specs[gen_type][-1])
-                process_dummy_chunk(ipfb_processor, ant_idx, pol_idx, gen_type=gen_type, specs=specs[gen_type], add_TS=(ant_idx==0 and pol_idx==0))
+        # for ant_idx in range(config.nant):
+        #     for pol_idx in range(config.npol):
+        #         print("sine t0", specs[gen_type][-1])
+        process_dummy_chunk(ipfb_processor, specs[gen_type], gen_type=gen_type)
 
         specs[gen_type][-1] += sizes.lchunk  # Increment time step offset for sine wave
 
@@ -232,7 +234,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
                 print("xin always same", cp.allclose(xin, xin_prev)) 
                 # xin = xin_prev
             print(job_idx*nblock,(job_idx+1)*nblock, "vis idx")
-            xin_prev = xin
+            xin_prev = xin.copy()
             vis[:, :, :, job_idx]= cp.asnumpy(
                 cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
             )
@@ -304,7 +306,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
     # print("pfb_buf, ts shape", buffer_mgr.pfb_buf.shape, ipfb_processor.ts.shape)
     # print("xin, xin_true shape", xin.shape, xin_true.shape)
     # print("vis, vis_true shapes", vis.shape, vis_true.shape)
-    print("time array the same", cp.allclose(buffer_mgr.pfb_buf[0,0].flatten(), ipfb_processor.ts[-sizes.szblock:]))
+    print("last time array the same", cp.allclose(buffer_mgr.pfb_buf[0,0].flatten(), ipfb_processor.ts[-sizes.szblock:]))
     print("vis same as vis_true", np.allclose(vis, vis_true))
     same = np.allclose(vis, vis_true)
     diff = np.abs(vis-vis_true)
@@ -330,15 +332,18 @@ if __name__=="__main__":
     gen_types = ['constant', 'uniform', 'gaussian', 'sine', 'random']
     # gen_type = 'uniform'  # Options: 'constant', 'uniform',  'gaussian', 'sine'
     # gen_types=['constant']
+    # gen_types =['random']
     success = []
     for gen_type in gen_types: 
-        print("\n", 50*"~")
+        print("\n")
+        print(50*"~")
         print(f"Testing gen_type: {gen_type}")
         print(50*"~")     
         pols, true_out, same =repfb_test(acclen,nchunks,nblock, osamp, nant=1, cut=cut,filt_thresh=0, gen_type=gen_type)
         success.append(same)
         fname = f"test_{gen_type}__{nblock}_{str(acclen)}_{str(osamp)}.npz"
         fpath = path.join(outdir,fname)
+
         # np.savez(fpath,data=pols.data,mask=pols.mask, true_data=true_out, true_mask=true_out.mask)
 
         print("\nSaved with an oversampling rate of", osamp, "and an acclen of", acclen, "at")
