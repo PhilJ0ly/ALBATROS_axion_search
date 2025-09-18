@@ -151,7 +151,7 @@ def repfb_test(acclen: int, nchunks: int, nblock: int,osamp: int, nant: int = 1,
     
     # Setup configuration
     config = ProcessingConfig(
-        acclen=acclen, pfb_size=0, nchunks=nchunks, nblock=nblock,
+        acclen=acclen, nchunks=nchunks, nblock=nblock,
         chanstart=0, chanend=1, osamp=osamp, nant=nant, cut=cut, filt_thresh=filt_thresh
     )
     sizes = BufferSizes.from_config(config)

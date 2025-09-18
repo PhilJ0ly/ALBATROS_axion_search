@@ -9,11 +9,11 @@
     },
     "correlation": {
         "start_timestamp": 1721361671,
-        "end_timestamp": 1721361681,
-        "osamp": 256, 
-        "ipfb_acclen": 1234,
+        "end_timestamp": 1721361709,
+        "osamp": 512, 
+        "ipfb_acclen": 1024,
         "cut": 10,
-        "nblock":15
+        "nblock":9
     },
     "frequency": {
         "start_channel":20, 

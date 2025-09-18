@@ -22,25 +22,24 @@ from albatros_analysis.src.utils import pfb_gpu_utils as pu
 from albatros_analysis.src.correlations import baseband_data_classes as bdc
 from albatros_analysis.src.correlations import correlations as cr
 
-lib = ctypes.CDLL('/home/philj0ly/albatros_analysis/scripts/xcorr/libcgemm_batch.so')
+# lib = ctypes.CDLL('/home/philj0ly/albatros_analysis/scripts/xcorr/libcgemm_batch.so')
 
-lib.cgemm_strided_batched.argtypes = [
-    ctypes.c_void_p,  # A.ptr
-    ctypes.c_void_p,  # B.ptr
-    ctypes.c_void_p,  # C.ptr
-    ctypes.c_int,     # M
-    ctypes.c_int,     # N
-    ctypes.c_int,     # K
-    ctypes.c_int      # batchCount
-]
-lib.cgemm_strided_batched.restype = None
+# lib.cgemm_strided_batched.argtypes = [
+#     ctypes.c_void_p,  # A.ptr
+#     ctypes.c_void_p,  # B.ptr
+#     ctypes.c_void_p,  # C.ptr
+#     ctypes.c_int,     # M
+#     ctypes.c_int,     # N
+#     ctypes.c_int,     # K
+#     ctypes.c_int      # batchCount
+# ]
+# lib.cgemm_strided_batched.restype = None
 
 
 @dataclass
 class ProcessingConfig:
     """Configuration for RePFB processing"""
-    acclen: int  # Accumulation length for IPFB input
-    pfb_size: int  # Size of the PFB transform
+    acclen: int  # Accumulation length for IPFB inputProcessingConfig
     nchunks: int  # Total number of IPFB output chunks to process
     nblock: int  # Number of PFB blocks per iteration (streamed)
     chanstart: int  # Start frequency channel
@@ -61,8 +60,8 @@ class BufferSizes:
     lchunk: int  # Length of time stream chunk after IPFB
     nchan: int  # Number of channels after oversampling
     num_of_pfbs: int  # Number of PFBs to process in total
-    last_pfb_nblock: int # nblock for the final PFB
-    num_of_spectra: int # output number of spectra
+    # last_pfb_nblock: int # nblock for the final PFB
+    # num_of_spectra: int # output number of spectra
     
     @classmethod
     def from_config(cls, config: ProcessingConfig) -> 'BufferSizes':
@@ -72,16 +71,62 @@ class BufferSizes:
         nchan = (config.chanend - config.chanstart) * config.osamp
         num_of_pfbs = int(np.ceil((lchunk*config.nchunks-(config.ntap-1)*lblock)/(config.nblock*lblock)))
 
-        extra = (lchunk*config.nchunks-(config.ntap-1)*lblock)%(config.nblock*lblock)
-        last_pfb_nblock = int(np.ceil(extra/lblock))
+        # extra = (lchunk*config.nchunks-(config.ntap-1)*lblock)%(config.nblock*lblock)
+        # last_pfb_nblock = int(np.ceil(extra/lblock))
         
-        if last_pfb_nblock == 0:
-            num_of_spectra = num_of_pfbs*config.nblock
+        # if last_pfb_nblock == 0:
+        #     num_of_spectra = num_of_pfbs*config.nblock
+        # else:
+        #     num_of_spectra = (num_of_pfbs-1)*config.nblock+last_pfb_nblock
+
+        return cls(lblock, szblock, lchunk, nchan, num_of_pfbs)
+
+class RunningMean:
+    """
+    Handles running averaging for numpy arrays
+    """
+    def __init__(self, bin_num: int, shape: Optional[Tuple[int]] = None, dtype: Optional[str] = None):
+        self.bin_num = bin_num
+        self.shape = shape
+        self.dtype = dtype
+
+        self.counter = np.zeros(bin_num, dtype="int64")
+
+        if shape is not None and dtype is not None:
+            self.mean = np.zeros((bin_num,)+shape, dtype=dtype)
+            self.count = np.zeros((bin_num,)+shape, dtype="int64")
         else:
-            num_of_spectra = (num_of_pfbs-1)*config.nblock+last_pfb_nblock
+            self.mean = None
+            self.count = None
 
-        return cls(lblock, szblock, lchunk, nchan, num_of_pfbs, last_pfb_nblock, num_of_spectra)
+    def add_to_mean(self, bin_idx, array: np.ndarray):
+        assert bin_idx < self.bin_num, f"Invalid index {bin_idx} not < {self.bin_num}"
 
+        if self.shape is None or self.dtype is None:
+            # Initialize mean array according to first input
+            self.shape = array.shape
+            self.dtype = array.dtype
+
+            self.mean = np.zeros((self.bin_num,)+self.shape, dtype=self.dtype)
+            self.count = np.zeros((self.bin_num,)+self.shape, dtype="int64")
+        else:
+            # baby-proofing
+            assert array.shape == self.shape, f"Invalid Mean Input. Expected {self.shape} array but got {array.shape}"
+            assert array.dtype == self.dtype, f"Invalid Mean Input. Expected array of type {self.dtype} but got {array.dtype}"
+
+        mask = ~np.ma.masked_invalid(array).mask
+
+        #update only where valid entries
+        self.count[bin_idx][mask] += 1
+
+        # running mean to mitigate floating point error
+        mean_delta = array - self.mean[bin_idx]
+        self.mean[bin_idx][mask] += mean_delta[mask] / self.count[bin_idx][mask]
+
+        self.counter[bin_idx] += 1
+
+    def get_mean(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        return self.mean, self.count, self.counter
 
 class BufferManager:
     """Manages GPU buffers for streaming processing"""
@@ -183,11 +228,9 @@ class IPFBProcessor:
         self.filt = filt
         self.buffers = buffer_mgr
         
-        self.ts = cp.zeros(buffer_mgr.sizes.lblock*(buffer_mgr.sizes.num_of_pfbs*config.nblock+config.ntap-1), dtype='float32') # this was for testing ts continuity
-        # print(buffer_mgr.sizes.num_of_spectra)
-        # to test the time count for visualise plasma bins
-        # self.t_chunk = 4096 * self.config.acclen / 250e6
-        # self.time_counter = 0.
+        # to test the time stream integrity of test_repfb.py
+        # self.ts = cp.zeros(buffer_mgr.sizes.lblock*(buffer_mgr.sizes.num_of_pfbs*config.nblock+config.ntap-1), dtype='float32') # this was for testing ts continuity
+        
     
     def process_chunk(self, chunk: dict, ant_idx: int, pol_idx: int, start_specnum: int):
         """Process a single chunk through inverse PFB"""
@@ -202,8 +245,6 @@ class IPFBProcessor:
             self.config.acclen,
             nchans=2049
         )
-        # if ant_idx ==0 and pol_idx ==0:
-        #     self.time_counter += self.t_chunk
         
         self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
 
@@ -298,7 +339,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     # Setup configuration
     nant = len(idxs)
     config = ProcessingConfig(
-        acclen=acclen, pfb_size=0, nchunks=nchunks, nblock=nblock,
+        acclen=acclen, nchunks=nchunks, nblock=nblock,
         chanstart=chanstart, chanend=chanend, osamp=osamp, nant=nant, cut=cut, filt_thresh=filt_thresh
     )
     sizes = BufferSizes.from_config(config)
@@ -318,7 +359,8 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     repfb_chanend = channels[config.chanend] * osamp
     
     # Initialize output arrays
-    xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
+    xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F') 
+    # Note that these HAVE TO be Fortran contiguous because of the hard-coded strides in the xcorr_avg
     vis = np.zeros((config.nant * config.npol, config.nant * config.npol, sizes.nchan, sizes.num_of_pfbs), dtype="complex64", order="F")
     
     start_specnums = [ant.spec_num_start for ant in antenna_objs]
@@ -374,14 +416,13 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         
         if verbose and job_idx % 100 == 0:
             print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} s")
-     # Pad buffer if incomplete
 
-    blocks_left = max(0,np.ceil((buffer_mgr.pfb_idx[0,0]-(config.ntap - 1)* sizes.lblock)/sizes.lblock))
-    assert blocks_left == sizes.last_pfb_nblock, f"last_pfb_nblock wrong: expected {sizes.last_pfb_nblock} but got {blocks_left}"
+    # blocks_left = max(0,np.ceil((buffer_mgr.pfb_idx[0,0]-(config.ntap - 1)* sizes.lblock)/sizes.lblock))
+    # assert blocks_left == sizes.last_pfb_nblock, f"last_pfb_nblock wrong: expected {sizes.last_pfb_nblock} but got {blocks_left}"
 
     if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
-
-        print(f"Job {job_idx + 1}: ")
+        if verbose:
+            print(f"Job {job_idx + 1}: ")
         # print("Extra", buffer_mgr.pfb_idx[0,0] - (config.ntap-1+sizes.last_pfb_nblock-1)*sizes.lblock, "<=", sizes.lblock)
 
         for ant_idx in range(config.nant):
@@ -399,15 +440,15 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
                 )[:, repfb_chanstart:repfb_chanend]
         
         vis[:, :, :, job_idx] = cp.asnumpy(
-            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, sizes.last_pfb_nblock, sizes.nchan, split=sizes.last_pfb_nblock, stay_split=True)
+            cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
         )
 
         print("Paded and Processed Incomplete Buffer")
     
-    if verbose:
-        print("=" * 30)
-        print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
-        print("=" * 30)
+    # if verbose:
+    print("=" * 30)
+    print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
+    print("=" * 30)
     
     vis = np.ma.masked_invalid(vis)
     freqs = np.arange(repfb_chanstart, repfb_chanend)
