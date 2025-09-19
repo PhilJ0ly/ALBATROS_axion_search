@@ -6,10 +6,12 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 import json
 import cupy as cp
 from typing import List, Tuple, Optional
+import time
 
 from os import path
 import sys
@@ -87,107 +89,87 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
     return time, plasma, bin_edges
 
 def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, 
-              t_chunk, osamp, width, height, outdir, 
-              log=False, all_stokes=False, band_per_plot=None):
+              t_chunk, osamp, ncols, outdir, 
+              log=False, all_stokes=False, band_per_plot=None, bin_counts=None):
+
     df_record = 125e6 / 2048  # (Hz) frequency range / # of channels
     df = df_record / osamp    # (Hz) / rechannelization factor
     freqs = chans * df        # frequencies for each channel
-
+    bin_width = (bin_edges[1] - bin_edges[0])/2
     scale = 'log' if log else 'linear'
 
-    # loop over the averaged data bins
-    for i, pols in enumerate(avg_data):
-        I_stokes = (pols[0,0] + pols[1,1]).real.astype("float32")
-        total_time = bin_counts[i] * t_chunk
+    # build PDF path
+    pdf_name = f"stokes_subbands_log_{log}_{str(osamp)}.pdf"
+    pdf_path = path.join(outdir, pdf_name)
 
-        # if band_per_plot is not specified, just plot everything in one go
-        if band_per_plot is None:
-            band_limits = [(freqs[0], freqs[-1])]
-        else:
-            # create frequency band edges
-            fmin, fmax = freqs[0], freqs[-1]
-            band_edges = np.arange(fmin, fmax + band_per_plot, band_per_plot)
-            band_limits = list(zip(band_edges[:-1], band_edges[1:]))
+    # set up subbands once
+    if band_per_plot is None:
+        band_limits = [(freqs[0], freqs[-1])]
+    else:
+        fmin, fmax = freqs[0], freqs[-1]
+        band_edges = np.arange(fmin, fmax + band_per_plot, band_per_plot)
+        band_limits = list(zip(band_edges[:-1], band_edges[1:]))
 
-        # now loop over frequency sub-bands
+    n_bins = len(avg_data)
+    nrows = int(np.ceil(n_bins / ncols))
+    height = min(6*nrows, 20)
+
+    with PdfPages(pdf_path) as pdf:
+        # loop over subbands first
         for (f_low, f_high) in band_limits:
-            # select only data in this frequency range
+            print(50*'-')
+            print(f_low, f_high)
             mask = (freqs >= f_low) & (freqs < f_high)
-            fsel = freqs[mask]
-            Isel = I_stokes[mask]
+            if not np.any(mask):
+                continue
 
-            plt.figure(figsize=(width, height))
-            plt.plot(fsel, Isel, label='I Stokes', color='blue')
-
-            if all_stokes:
-                Q_stokes = (pols[0,0] - pols[1,1]).real.astype("float32")[mask]
-                U_stokes = (pols[1,0] + pols[0,1])[mask]
-                V_stokes = (pols[1,0] - pols[0,1])[mask]
-                plt.plot(fsel, Q_stokes, label='Q Stokes', color='orange')
-                plt.plot(fsel, np.abs(U_stokes), label='|U Stokes|', color='green')
-                plt.plot(fsel, np.abs(V_stokes), label='|V Stokes|', color='red')
-
-            plt.title(
-                f'Stokes Parameter {f_low/1e3:.0f}-{f_high/1e3:.0f} kHz '
-                f'from {bin_edges[i]} to {bin_edges[i+1]} Hz '
-                f'over {total_time/60:.1f} minutes'
+            fig, axes = plt.subplots(
+                nrows=nrows, ncols=ncols, sharey='row', figsize=(25,height), squeeze=False
             )
-            plt.xlabel('Frequency (Hz)')
-            plt.ylabel('Intensity')
-            plt.yscale(scale)
-            plt.grid()
-            plt.legend()
-
-            fname = (
-                f'stokes_{all_stokes}_plot_band_log_{log}_'
-                f'{bin_edges[i]}_{bin_edges[i+1]}_{str(osamp)}_'
-                f'{total_time}_{int(f_low)}-{int(f_high)}Hz.png'
+            bw = (f_high-f_low)/2
+            fig.suptitle(
+                f"Stokes Parameter I for Spectrum Band {(f_low+bw)/1e3:.0f}+–{bw/1e3:.0f} kHz\n", fontsize=24
             )
-            fpath = path.join(outdir, fname)
-            plt.savefig(fpath)
-            plt.close()
-    
-    print(f"Saved plots to {outdir}")
 
-def get_plots_og(avg_data, bin_edges, missing_fraction, total_counts, chans, t_chunk, osamp, width, height, outdir, log=False, all_stokes=False):
-    df_record = 125e6/2048 # (Hz) frequency range / # of channels
-    df = df_record/osamp # (Hz) / rechannelization factor
-    freqs = chans*df
+            for i, pols in enumerate(avg_data):
+                ax = axes[i // ncols, i % ncols]
 
-    scale = 'linear'
-    if log:
-        scale = 'log'
+                I_stokes = (pols[0,0] + pols[1,1]).real.astype("float32")[mask]
 
-    for i in avg_data:
-        I_stokes = (pols[0,0] + pols[1,1]).real.astype("float32")
-        total_time = bin_counts[i]*t_chunk
+                ax.plot(freqs[mask], I_stokes, label='I Stokes', color='blue')
 
-        plt.figure(figsize=(width, height))
-        plt.plot(freqs, I_stokes, label='I Stokes', color='blue')
+                if all_stokes:
+                    Q_stokes = (pols[0,0] - pols[1,1]).real.astype("float32")[mask]
+                    U_stokes = (pols[1,0] + pols[0,1])[mask]
+                    V_stokes = (pols[1,0] - pols[0,1])[mask]
+                    ax.plot(freqs[mask], Q_stokes, label='Q Stokes', color='orange')
+                    ax.plot(freqs[mask], np.abs(U_stokes), label='|U Stokes|', color='green')
+                    ax.plot(freqs[mask], np.abs(V_stokes), label='|V Stokes|', color='red')
 
-        if all_stokes:
-            Q_stokes = (pols[0,0] - pols[1,1]).real.astype("float32")
-            U_stokes = pols[1,0] + pols[0,1]
-            V_stokes = pols[1,0] - pols[0,1]
-            plt.plot(freqs, Q_stokes, label='Q Stokes', color='orange')
-            plt.plot(freqs, np.abs(U_stokes), label='|U Stokes|', color='green')
-            plt.plot(freqs, np.abs(V_stokes), label='|V Stokes|', color='red')
+                total_time = total_counts[i] * t_chunk
 
-        plt.title(f'Stokes Parameter - Plasma Frequency from {bin_edges[i]} to {bin_edges[i+1]} Hz over {total_time/60} minutes')
-        plt.xlabel('Frequency (Hz)')
-        plt.ylabel('Intensity')
-        plt.yscale(scale)
-        plt.grid()
-        plt.legend()
+                ax.set_title(
+                    f"Plasma Frequency [{i}] {(bin_edges[i])/1e3:.0f}-{bin_edges[i+1]/1e3:.0f} kHz\n"
+                    f"{total_time/60:.1f} min | " 
+                    f"Missing fraction: {missing_fraction[i]*100:.1f}%"
+                )
 
-        fname = f'graphs/stokes_{all_stokes}_plot_band_log_{log}_{bin_edges[i]}_{bin_edges[i+1]}_{str(osamp)}_{total_time}.png'
-        fpath = path.join(outdir,fname)
-        plt.savefig(fpath)
-        plt.close()
-    
-    print(f"Saved plots to {outdir}")
+                ax.set_xlabel("Spectrum Frequency [Hz]")
+                if i%ncols ==0:
+                    ax.set_ylabel(f"Stokes I ({scale} scale)")
+                ax.set_yscale(scale)
 
-def plot_from_data(data_path, width, height, outdir, log=False, all_stokes=False, band_per_plot=None):
+            # remove unused subplots
+            for j in range(n_bins, nrows*ncols):
+                fig.delaxes(axes[j // ncols, j % ncols])
+
+            fig.tight_layout(rect=[0, 0, 1, 0.95])
+            pdf.savefig(fig)
+            plt.close(fig)
+
+    print(f"Saved graphs to {pdf_path}")
+
+def plot_from_data(data_path, ncols, outdir, log=False, all_stokes=False, band_per_plot=None):
     with np.load(data_path) as f:
         avg_data = f["data"]
         missing_fraction = f["missing_fraction"]
@@ -197,7 +179,7 @@ def plot_from_data(data_path, width, height, outdir, log=False, all_stokes=False
         chans = f["chans"]
         osamp = f["osamp"]
 
-    get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, t_chunk, osamp, width, height, outdir, log=log, all_stokes=all_stokes band_per_plot=band_per_plot)
+    get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, t_chunk, osamp, ncols, outdir, log=log, all_stokes=all_stokes, band_per_plot=band_per_plot)
 
 
 def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[RunningMean], dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
@@ -299,7 +281,12 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
                 time_idx += 1
             
             bin_idx = plasma[time_idx]
-            avg_vis.add_to_mean(bin_idx, cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1))
+            avg_vis.add_to_mean(
+                bin_idx, 
+                cp.asnumpy(
+                    cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+                )
+            )
 
             buffer_mgr.reset_overlap_region()
             for ant_idx in range(config.nant):
@@ -335,8 +322,12 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
     #         time_idx += 1
         
     #     bin_idx = plasma[time_idx]
-    #     avg_vis[bin_idx].add_to_mean(cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1))
-
+    #     avg_vis.add_to_mean(
+    #                 bin_idx, 
+    #                 cp.asnumpy(
+    #                     cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
+    #                 )
+    #             )
 
     #     print("Paded and Processed Incomplete Buffer")
     
@@ -350,7 +341,9 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
     return t_chunk, freqs, window, filt
 
 
-def main(plot_sz=None):
+def main(plot_cols=None, band_per_plot=None):
+    timer1 = time.time()
+
     config_fn = "visual_config.json"
     if len(sys.argv) > 1:
         config_fn = sys.argv[1]  
@@ -409,20 +402,26 @@ def main(plot_sz=None):
             window=window, filt=filt
         )
 
-    missing_fraction = 1.-avg_vis.counts.mean(axis=tuple(range(1,avg_vis.counts.ndim)))/avg_vis.counter
+    missing_fraction = 1.-avg_vis.count.mean(axis=tuple(range(1,avg_vis.count.ndim)))/avg_vis.counter
 
     fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"
     fpath = path.join(outdir,fname)
-    np.savez(fpath, data=avg_vis.mean, missing_fraction=missing_fraction, total_counts=avg_vis.counter bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
+    np.savez(fpath, data=avg_vis.mean, missing_fraction=missing_fraction, total_counts=avg_vis.counter, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
 
     print(f"Saved ALBATROS data with an oversampling rate of {osamp} in {bin_num} plasma frequency bins at")
     print(fpath)
 
-    if plot:
-        band_per_plot = 100e3
-        get_plots(avg_vis.mean, bin_edges, missing_fraction, avg_vis.counter, channels, t_chunk, osamp, plot_sz[0], plot_sz[1], outdir, log=True, all_stokes=False, band_per_plot=band_per_plot)
+    timer2 = time.time()
+    print(f"Processing took {timer2-timer1} s")
+
+    if plot_cols is not None:
+        get_plots(avg_vis.mean, bin_edges, missing_fraction, avg_vis.counter, channels, t_chunk, osamp, plot_cols, outdir, log=True, all_stokes=False, band_per_plot=band_per_plot)
+
 
 if __name__=="__main__":
-    main()
-    
-   
+    # main(plot_sz=(12,6))
+
+    data_path = '/scratch/philj0ly/test_09_18/average_plasma_bins_4_65536_1721379700_1721381500_47_50.npz'
+    outdir = '/scratch/philj0ly/test_09_18/'
+
+    plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=50e3)
