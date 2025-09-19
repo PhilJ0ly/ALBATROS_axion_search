@@ -12,10 +12,10 @@
         "acclen": 2048, 
         "nblock": 5,
         "cut": 10,
-        "bin_num": 4
+        "bin_num": 20
     },
     "misc": {
-        "out_dir": "/scratch/philj0ly/plasma_bins/30_min_test",
+        "out_dir": "/scratch/philj0ly/vis_plasma",
         "plasma_path": "/project/rrg-sievers/philj0ly/CHAIM/CSV/ACHAIM_nmf2.csv"
     },
     "frequency": {

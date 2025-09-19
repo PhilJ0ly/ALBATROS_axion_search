@@ -118,7 +118,7 @@ def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans,
         # loop over subbands first
         for (f_low, f_high) in band_limits:
             print(50*'-')
-            print(f_low, f_high)
+            print(f"Spectrum Band {(f_low+bw)/1e3:.0f}+–{bw/1e3:.0f} kHz")
             mask = (freqs >= f_low) & (freqs < f_high)
             if not np.any(mask):
                 continue
@@ -180,7 +180,6 @@ def plot_from_data(data_path, ncols, outdir, log=False, all_stokes=False, band_p
         osamp = f["osamp"]
 
     get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, t_chunk, osamp, ncols, outdir, log=log, all_stokes=all_stokes, band_per_plot=band_per_plot)
-
 
 def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[RunningMean], dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
     """
@@ -378,18 +377,19 @@ def main(plot_cols=None, band_per_plot=None):
     plasma_path = config["misc"]["plasma_path"]
     outdir = config["misc"]["out_dir"]
 
-    obs_period = (1721342139+5*60, 1721449881) # Full observation period (+5min just for buffer times will be shifted back by 2.5min)
+    # obs_period = (1721342139+5*60, 1721449881) # Full observation (first 2 chunks) period (+5min just for buffer times will be shifted back by 2.5min)
 
-    obs_period = (1721342250+5*60, 1721368700) # First 'continuous' chunk of observation period
-    # Note that there are some holes in the albatros data towards the beginning
-    obs_period = (1721379700, 1721411900) # Second 'continuous' chunk of observation period
-    # To do: get from json
+    # obs_period = (1721342250+5*60, 1721368700) # First 'continuous' chunk of observation period
+    # # Note that there are some holes in the albatros data towards the beginning
+    # obs_period = (1721379700, 1721411900) # Second 'continuous' chunk of observation period
+    # # To do: get from json
+    # obs_period = (1721379700, 1721379700+30*60) # 30 minute test
 
-    obs_period = (1721379700, 1721379700+30*60) # 30 minute test
+    obs_period = (1721342774+5*60, 1721666031) # Full observation period adjusted for holes in data at start
 
     all_time, all_plasma = get_plasma_data(plasma_path, obs_period)
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"))
-
+    
     # Initialize mean tracker for each bin
     avg_vis = RunningMean(bin_num)
 
@@ -415,13 +415,13 @@ def main(plot_cols=None, band_per_plot=None):
     print(f"Processing took {timer2-timer1} s")
 
     if plot_cols is not None:
+        print("Printing...")
         get_plots(avg_vis.mean, bin_edges, missing_fraction, avg_vis.counter, channels, t_chunk, osamp, plot_cols, outdir, log=True, all_stokes=False, band_per_plot=band_per_plot)
 
 
 if __name__=="__main__":
-    # main(plot_sz=(12,6))
+    main(plot_cols=4, band_per_plot=100e3)
 
-    data_path = '/scratch/philj0ly/test_09_18/average_plasma_bins_4_65536_1721379700_1721381500_47_50.npz'
-    outdir = '/scratch/philj0ly/test_09_18/'
-
-    plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=50e3)
+    # data_path = '/scratch/philj0ly/test_09_18/average_plasma_bins_4_65536_1721379700_1721381500_47_50.npz'
+    # outdir = '/scratch/philj0ly/test_09_18/'
+    # plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=50e3)
