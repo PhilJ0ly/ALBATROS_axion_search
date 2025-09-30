@@ -49,7 +49,96 @@ def get_plasma_data(plasma_path: str, obs_period: Tuple[int, int]) -> Tuple[np.n
 
     return time, plasma
 
-def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, plot_bins_path: str = None) -> Tuple[List[List[int]], List[List[float]]]:
+def split_gaps(times: List[np.int64], plasma: List[int], gaps: List[Tuple[int, int]]):
+    """
+    Split time and plasma lists into continuous chunks based on data gaps.
+    
+    Parameters:
+    times : list
+        List of timestamps 
+    plasma : list
+        List of plasma values where plasma[i] corresponds to interval times[i] -> times[i+1]
+        Length should be len(times) - 1
+    gaps : list of tuples
+        List of (gap_start, gap_duration) tuples defining data gaps
+        
+    Returns:
+    time_chunks : list of lists
+        List of continuous time chunks
+    plasma_chunks : list of lists
+        List of corresponding plasma chunks
+     
+    """
+    
+    if len(plasma) != len(times) - 1:
+        raise ValueError(f"Plasma length ({len(plasma)}) must be len(times) - 1 ({len(times) - 1})")
+    
+    # Track which indices to keep and where to split
+    time_chunks = []
+    current_chunk = []
+    kept_indices = []  # indices in original times list that we keep
+    
+    for i, t in enumerate(times):
+        # Check if this timestamp falls within any gap
+        exclude = False
+        for gap_start, gap_duration in gaps:
+            gap_end = gap_start + gap_duration
+            if gap_start <= t <= gap_end:
+                exclude = True
+                break
+        
+        if exclude:
+            if current_chunk:
+                time_chunks.append(current_chunk)
+                current_chunk = []
+        else:
+            # Check if this timestamp comes after a gap
+            should_break = False
+            if current_chunk:
+                for gap_start, gap_duration in gaps:
+                    gap_end = gap_start + gap_duration
+                    last_t = times[kept_indices[-1]]
+                    if last_t < gap_start and t > gap_end:
+                        should_break = True
+                        break
+            
+            if should_break and current_chunk:
+                time_chunks.append(current_chunk)
+                current_chunk = [t]
+                kept_indices.append(i)
+            else:
+                current_chunk.append(t)
+                kept_indices.append(i)
+    
+    if current_chunk:
+        time_chunks.append(current_chunk)
+    
+    # Now split plasma list based on intervals
+    # plasma[i] corresponds to interval times[i] -> times[i+1]
+    plasma_chunks = []
+    chunk_start_idx = 0
+    
+    for chunk in time_chunks:
+        chunk_len = len(chunk)
+        # For each time chunk, we have chunk_len - 1 plasma intervals
+        # Only keep chunks with at least 2 timestamps (1+ plasma intervals)
+        if chunk_len > 1:
+            plasma_chunk = []
+            for i in range(chunk_len - 1):
+                # Find the original index for this time point
+                original_idx = kept_indices[chunk_start_idx + i]
+                plasma_chunk.append(plasma[original_idx])
+            
+            plasma_chunks.append(plasma_chunk)
+        
+        chunk_start_idx += chunk_len
+    
+    # Filter out time chunks with only 1 timestamp
+    time_chunks = [chunk for chunk in time_chunks if len(chunk) > 1]
+    
+    return time_chunks, plasma_chunks
+
+def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, plot_bins_path: str = None, split_for_gaps: bool = False) -> Tuple[List[List[int]], List[List[float]]]:
     """
     Bin plasma data into specified number of bins, and group by time intervals where we have continuous achaim data.
     returns 
@@ -85,6 +174,42 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
         plt.grid(True, which='both', linestyle='--', linewidth=0.5)
         plt.savefig(plot_bins_path)
         plt.close()
+
+    gaps = [
+        [
+            (1721343875, 42),
+            (1721344517, 43),
+            (1721346596, 43),
+            (1721351039, 42),
+            (1721351881, 49),
+            (1721360558, 43)
+        ],
+        [
+            (1721381476, 43),
+            (1721382716, 42),
+            (1721385159, 44),
+            (1721401206, 43),
+            (1721404804, 206),
+            (1721410495, 47),
+            (1721411719, 43)
+        ],
+        [
+            (1721639204, 49),
+            (1721640533, 51)
+        ]
+    ]
+    
+    if split_for_gaps:
+        new_time = []
+        new_plasma = []
+
+        for i in range(len(gaps)):
+            cts_time_chunk, cts_plasma_chunk = split_gaps(time[i], plasma[i], gaps[i])
+
+            new_time.extend(cts_time_chunk)
+            new_plasma.extend(cts_plasma_chunk)
+        
+        time, plasma = new_time, new_plasma
 
     return time, plasma, bin_edges
 
@@ -212,7 +337,7 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
     end_t = time[-1]
     min_t_int = np.min(np.diff(time))
     nchunks = int(np.floor((end_t-init_t)*250e6/4096/acclen))
-    idxs, files = get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents)
+    idxs, files = get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents) 
 
     # Setup configuration
     nant = len(idxs)
@@ -299,36 +424,6 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
         
 
     # Do not add the last incomplete pfb chunk to avoid tainting any results
-
-    # if buffer_mgr.pfb_idx[0,0] > (config.ntap - 1)* sizes.lblock:
-
-    #     print(f"Job {job_idx + 1}: ")
-    #     print(f"Buffer not Full with only {buffer_mgr.pfb_idx[0,0]} < {sizes.szblock}")
-
-    #     for ant_idx in range(config.nant):
-    #         for pol_idx in range(config.npol):
-    #             buffer_mgr.pad_incomplete_buffer(ant_idx, pol_idx)
-    #             output_start = ant_idx * config.nant + pol_idx # <-- still not sure
-    #             xin[output_start, :, :] = pu.cupy_pfb(
-    #                 buffer_mgr.pfb_buf[ant_idx, pol_idx], 
-    #                 window,
-    #                 nchan=2048 * osamp + 1, 
-    #                 ntap=4
-    #             )[:, repfb_chanstart:repfb_chanend]
-        
-    #     time_track += t_chunk
-    #     while time_idx < time_max_idx and t_chunk/2 < time_track - time[time_idx+1]: # <- will land in the bin where most of the time stream comes from
-    #         time_idx += 1
-        
-    #     bin_idx = plasma[time_idx]
-    #     avg_vis.add_to_mean(
-    #                 bin_idx, 
-    #                 cp.asnumpy(
-    #                     cr.avg_xcorr_all_ant_gpu(xin, config.nant, config.npol, nblock, sizes.nchan, split=1)
-    #                 )
-    #             )
-
-    #     print("Paded and Processed Incomplete Buffer")
     
     if verbose:
         print("=" * 30)
@@ -386,12 +481,14 @@ def main(plot_cols=None, band_per_plot=None):
     # obs_period = (1721379700, 1721379700+30*60) # 30 minute test
 
     obs_period = (1721342774+5*60, 1721666031) # Full observation period adjusted for holes in data at start
-
+    # 1721360558.
     all_time, all_plasma = get_plasma_data(plasma_path, obs_period)
-    binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"))
+    binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
     avg_vis = RunningMean(bin_num)
+
+    # print(binned_time[-1])
 
     for i in range(len(binned_time)):
         print(f"Processing continuous chunk {i+1}/{len(binned_time)} over {len(binned_time[i])*5} minutes")
@@ -401,7 +498,7 @@ def main(plot_cols=None, band_per_plot=None):
             chanstart, chanend, osamp, cut=cut, filt_thresh=0.45,
             window=window, filt=filt
         )
-
+    sys.exit(0)
     missing_fraction = 1.-avg_vis.count.mean(axis=tuple(range(1,avg_vis.count.ndim)))/avg_vis.counter
 
     fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"

@@ -1,4 +1,5 @@
 albatros_analysis/scripts/xcorr/test/out/
+albatros_analysis/scripts/xcorr/gaps.txt
 
 .bash_profile
 .bashrc
