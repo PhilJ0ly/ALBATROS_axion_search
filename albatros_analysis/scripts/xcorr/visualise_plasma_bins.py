@@ -353,12 +353,12 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
     
     # Initialize managers
     buffer_mgr = BufferManager(config, sizes)
-    ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, channel_idxs, filt)
+    ipfb_processor = IPFBProcessor(config, buffer_mgr, channels, channel_idxs-64, filt)
     missing_tracker = MissingDataTracker(nant, sizes.num_of_pfbs)
     
     # Setup frequency ranges
-    repfb_chanstart = channels[config.chanstart] * osamp
-    repfb_chanend = channels[config.chanend] * osamp
+    repfb_chanstart = channels[config.chanstart-64] * osamp
+    repfb_chanend = channels[config.chanend-64] * osamp
     
     # Initialize output arrays
     xin = cp.empty((config.nant * config.npol, nblock, sizes.nchan), dtype='complex64', order='F')
@@ -430,7 +430,7 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
         print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
         print("=" * 30)
     
-    freqs = np.arange(repfb_chanstart, repfb_chanend)
+    freqs = np.arange(repfb_chanstart+64*osamp, repfb_chanend+ 64*osamp)
     
     return t_chunk, freqs, window, filt
 

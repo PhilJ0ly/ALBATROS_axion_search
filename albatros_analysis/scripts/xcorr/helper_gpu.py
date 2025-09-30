@@ -222,6 +222,7 @@ class IPFBProcessor:
     """Handles IPFB processing of chunks to time stream"""
     
     def __init__(self, config: ProcessingConfig, buffer_mgr: BufferManager, channels: np.ndarray, channel_idxs: np.ndarray, filt: cp.ndarray):
+
         self.config = config
         self.channels = channels
         self.channel_idxs = channel_idxs
