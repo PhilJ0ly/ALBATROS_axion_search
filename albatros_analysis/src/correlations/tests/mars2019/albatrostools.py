@@ -439,7 +439,7 @@ def get_data(file_name, items=-1, unpack_fast=False, float=False, byte_delta=-8)
         ],
     )
     t2 = time.time()
-    print("took ", t2 - t1, " seconds to read raw data on ", file_name)
+    # print("took ", t2 - t1, " seconds to read raw data on ", file_name)
     file_data.close()
     if header["bit_mode"] == 1:
         raw_spectra = data["spectra"].reshape(-1, header["length_channels"] // 2)

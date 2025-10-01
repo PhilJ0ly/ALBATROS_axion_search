@@ -167,14 +167,19 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
 
     if plot_bins_path is not None:
         plt.figure(figsize=(12,10))
-        plt.hist(plasma, bins=bin_num, edgecolor='black', alpha=0.7)
+        plt.hist([item for sub_plasma in plasma for item in sub_plasma], bins=bin_num, align='right', edgecolor='black', alpha=0.7)
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        plt.xticks(np.arange(bin_num),labels=[f"{c/1e6:.2f}" for c in bin_centers], rotation=45)
+        # plt.xticks(np.arange(bin_num+1))
+
         plt.title('Histogram of Plasma Frequencies')
-        plt.xlabel('Plasma Frequency (Hz)')
+        plt.xlabel('Plasma Frequency (MHz)')
         plt.ylabel('Count of 5 min intervals')
         plt.grid(True, which='both', linestyle='--', linewidth=0.5)
         plt.savefig(plot_bins_path)
         plt.close()
-
+    # print(plasma)
+    # print(bin_num)
     gaps = [
         [
             (1721343875, 42),
@@ -193,10 +198,10 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
             (1721410495, 47),
             (1721411719, 43)
         ],
-        [
-            (1721639204, 49),
-            (1721640533, 51)
-        ]
+        # [
+        #     (1721639204, 49),
+        #     (1721640533, 51)
+        # ]
     ]
     
     if split_for_gaps:
@@ -210,24 +215,37 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
             new_plasma.extend(cts_plasma_chunk)
         
         time, plasma = new_time, new_plasma
+    
+    if plot_bins_path is not None:
+        plt.figure(figsize=(12,10))
+        plt.hist([item for sub_plasma in plasma for item in sub_plasma], bins=bin_num, align='right', edgecolor='black', alpha=0.7)
+        bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+        plt.xticks(np.arange(bin_num),labels=[f"{c/1e6:.2f}" for c in bin_centers], rotation=45)
+        # plt.xticks(np.arange(bin_num+1))
 
+        plt.title('Histogram of Plasma Frequencies')
+        plt.xlabel('Plasma Frequency (MHz)')
+        plt.ylabel('Count of 5 min intervals')
+        plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+        plt.savefig(plot_bins_path)
+        plt.close()
+   
+   
     return time, plasma, bin_edges
 
 def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, 
               t_chunk, osamp, ncols, outdir, 
               log=False, all_stokes=False, band_per_plot=None, bin_counts=None):
 
-    df_record = 125e6 / 2048  # (Hz) frequency range / # of channels
+    df_record = 125e6 / 4096  # (Hz) frequency range / # of channels
     df = df_record / osamp    # (Hz) / rechannelization factor
     freqs = chans * df        # frequencies for each channel
-    bin_width = (bin_edges[1] - bin_edges[0])/2
+    # bw = (bin_edges[1] - bin_edges[0])/2
     scale = 'log' if log else 'linear'
 
-    # build PDF path
     pdf_name = f"stokes_subbands_log_{log}_{str(osamp)}.pdf"
     pdf_path = path.join(outdir, pdf_name)
 
-    # set up subbands once
     if band_per_plot is None:
         band_limits = [(freqs[0], freqs[-1])]
     else:
@@ -242,6 +260,7 @@ def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans,
     with PdfPages(pdf_path) as pdf:
         # loop over subbands first
         for (f_low, f_high) in band_limits:
+            bw = (f_high-f_low)/2
             print(50*'-')
             print(f"Spectrum Band {(f_low+bw)/1e3:.0f}+–{bw/1e3:.0f} kHz")
             mask = (freqs >= f_low) & (freqs < f_high)
@@ -251,7 +270,6 @@ def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans,
             fig, axes = plt.subplots(
                 nrows=nrows, ncols=ncols, sharey='row', figsize=(25,height), squeeze=False
             )
-            bw = (f_high-f_low)/2
             fig.suptitle(
                 f"Stokes Parameter I for Spectrum Band {(f_low+bw)/1e3:.0f}+–{bw/1e3:.0f} kHz\n", fontsize=24
             )
@@ -346,9 +364,20 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
         chanstart=chanstart, chanend=chanend, osamp=osamp, nant=nant, cut=cut, filt_thresh=filt_thresh
     )
     sizes = BufferSizes.from_config(config)
+
+    # Note that the recording frequency is 250 MSPS which means that each sample corresponds to 1/250e6 s
+    time_track = init_t + sizes.lblock * (config.ntap - 1) / 250e6 # this is to adjust for the additional (ntap-1)*lblock
+    time_idx = 0
+    time_max_idx = len(time)-1
+    t_chunk = sizes.lblock * nblock / 250e6 # in seconds <-- already checked that this is correct
     
     # Setup components
     antenna_objs, channels, channel_idxs = setup_antenna_objects(idxs, files, config)
+    if len(channels) < chanend - chanstart:
+        print(f"Warning: Not enough channels to cover requested range {chanstart}-{chanend-1}, available channels are {channel_idxs[0]}-{channel_idxs[-1]}")
+        print(len(channels), len(channel_idxs), chanstart, chanend, channel_idxs[0], channel_idxs[-1])
+        return t_chunk, None, window, filt # not enough channels to cover requested range
+
     window, filt = setup_filters_and_windows(config, window, filt)
     
     # Initialize managers
@@ -367,12 +396,6 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
     
     if verbose:
         _print_debug_info(config, sizes, buffer_mgr, sizes.num_of_pfbs, nchunks)
-    
-    # Note that the recording frequency is 250 MSPS which means that each sample corresponds to 1/250e6 s
-    time_track = init_t + sizes.lblock * (config.ntap - 1) / 250e6 # this is to adjust for the additional (ntap-1)*lblock
-    time_idx = 0
-    time_max_idx = len(time)-1
-    t_chunk = sizes.lblock * nblock / 250e6 # in seconds <-- checked that this is correct
 
     job_idx = 0
 
@@ -472,33 +495,36 @@ def main(plot_cols=None, band_per_plot=None):
     plasma_path = config["misc"]["plasma_path"]
     outdir = config["misc"]["out_dir"]
 
-    # obs_period = (1721342139+5*60, 1721449881) # Full observation (first 2 chunks) period (+5min just for buffer times will be shifted back by 2.5min)
+    obs_period = (1721342774+5*60, 1721449881) # Full observation (first 2 chunks) period (+5min just for buffer times will be shifted back by 2.5min)
 
     # obs_period = (1721342250+5*60, 1721368700) # First 'continuous' chunk of observation period
     # # Note that there are some holes in the albatros data towards the beginning
     # obs_period = (1721379700, 1721411900) # Second 'continuous' chunk of observation period
+
     # # To do: get from json
     # obs_period = (1721379700, 1721379700+30*60) # 30 minute test
 
-    obs_period = (1721342774+5*60, 1721666031) # Full observation period adjusted for holes in data at start
-    # 1721360558.
+    # obs_period = (1721342774+5*60, 1721666031) # Full observation period adjusted for holes in data at start
+    # # 1721360558.
+    # obs_period = (1721411900+5*60, 1721666031) # Third 'continuous' chunk of observation period
+    
     all_time, all_plasma = get_plasma_data(plasma_path, obs_period)
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
     avg_vis = RunningMean(bin_num)
 
-    # print(binned_time[-1])
-
+    channels = None
+    window, filt = None, None # window and filter can be reused between calls as same acclen, nblock, osamp
     for i in range(len(binned_time)):
         print(f"Processing continuous chunk {i+1}/{len(binned_time)} over {len(binned_time[i])*5} minutes")
-        window, filt = None, None
-        t_chunk, channels, window, filt = repfb_xcorr_bin_avg(
+        t_chunk, new_channels, window, filt = repfb_xcorr_bin_avg(
             binned_time[i], binned_plasma[i], avg_vis, dir_parents, spec_offsets, acclen, nblock,
             chanstart, chanend, osamp, cut=cut, filt_thresh=0.45,
             window=window, filt=filt
         )
-    sys.exit(0)
+        channels = new_channels if new_channels is not None else channels
+
     missing_fraction = 1.-avg_vis.count.mean(axis=tuple(range(1,avg_vis.count.ndim)))/avg_vis.counter
 
     fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"
@@ -519,6 +545,6 @@ def main(plot_cols=None, band_per_plot=None):
 if __name__=="__main__":
     main(plot_cols=4, band_per_plot=100e3)
 
-    # data_path = '/scratch/philj0ly/test_09_18/average_plasma_bins_4_65536_1721379700_1721381500_47_50.npz'
-    # outdir = '/scratch/philj0ly/test_09_18/'
-    # plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=50e3)
+    # data_path = '/scratch/philj0ly/vis_plasma/average_plasma_bins_20_65536_1721343074_1721666031_64_183.npz'
+    # outdir = '/scratch/philj0ly/vis_plasma/plots/'
+    # plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=100e3)

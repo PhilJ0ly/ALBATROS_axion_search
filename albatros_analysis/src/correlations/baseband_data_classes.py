@@ -227,7 +227,7 @@ class Baseband:
                     ],
                 )
                 t2 = time.time()
-                print(f"took {t2-t1:5.3f} seconds to read raw data on ", file_name)
+                # print(f"took {t2-t1:5.3f} seconds to read raw data on ", file_name)
                 self.raw_data = xp.array(data["spectra"], dtype="uint8", order='c') #only raw data in GPU (if enabled)
                 self.spec_num = np.array(data["spec_num"], dtype="int64", order='c')
                 # check for specnum overflow in current file
