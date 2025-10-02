@@ -81,23 +81,29 @@ class BufferSizes:
 
         return cls(lblock, szblock, lchunk, nchan, num_of_pfbs)
 
-class RunningMean:
+class MeanTracker:
     """
-    Handles running averaging for numpy arrays
+    Handles averaging for numpy arrays
+
+    self.sum: Sum of arrays added to each bin
+    self.count: Count of valid entries per spectrum frequency bin per plasma bin
+    self.counter: Count of arrays added to each bin
     """
+
     def __init__(self, bin_num: int, shape: Optional[Tuple[int]] = None, dtype: Optional[str] = None):
         self.bin_num = bin_num
         self.shape = shape
         self.dtype = dtype
 
         self.counter = np.zeros(bin_num, dtype="int64")
+        self.sum = None
+        self.count = None
 
         if shape is not None and dtype is not None:
-            self.mean = np.zeros((bin_num,)+shape, dtype=dtype)
+            self.sum = np.zeros((bin_num,)+shape, dtype=dtype)
             self.count = np.zeros((bin_num,)+shape, dtype="int64")
         else:
-            self.mean = None
-            self.count = None
+            
 
     def add_to_mean(self, bin_idx, array: np.ndarray):
         assert bin_idx < self.bin_num, f"Invalid index {bin_idx} not < {self.bin_num}"
@@ -118,15 +124,11 @@ class RunningMean:
 
         #update only where valid entries
         self.count[bin_idx][mask] += 1
-
-        # running mean to mitigate floating point error
-        mean_delta = array - self.mean[bin_idx]
-        self.mean[bin_idx][mask] += mean_delta[mask] / self.count[bin_idx][mask]
-
+        self.sum[bin_idx][mask] += array[mask]
         self.counter[bin_idx] += 1
 
     def get_mean(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        return self.mean, self.count, self.counter
+        return self.sum/self.count, self.count, self.counter
 
 class BufferManager:
     """Manages GPU buffers for streaming processing"""

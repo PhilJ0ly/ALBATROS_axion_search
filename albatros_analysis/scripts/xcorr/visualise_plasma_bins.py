@@ -237,9 +237,9 @@ def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans,
               t_chunk, osamp, ncols, outdir, 
               log=False, all_stokes=False, band_per_plot=None, bin_counts=None):
 
-    df_record = 125e6 / 4096  # (Hz) frequency range / # of channels
+    df_record = 125e6 / 2048  # (Hz) frequency range / # of channels
     df = df_record / osamp    # (Hz) / rechannelization factor
-    freqs = chans * df        # frequencies for each channel
+    freqs = chans * df        # frequencies for each channel # for the data we have error slipped in with chans 64 *osamp ahead
     # bw = (bin_edges[1] - bin_edges[0])/2
     scale = 'log' if log else 'linear'
 
@@ -453,7 +453,7 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
         print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
         print("=" * 30)
     
-    freqs = np.arange(repfb_chanstart+64*osamp, repfb_chanend+ 64*osamp)
+    freqs = np.arange(repfb_chanstart, repfb_chanend)
     
     return t_chunk, freqs, window, filt
 
@@ -512,7 +512,7 @@ def main(plot_cols=None, band_per_plot=None):
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
-    avg_vis = RunningMean(bin_num)
+    avg_vis = MeanTracker(bin_num)
 
     channels = None
     window, filt = None, None # window and filter can be reused between calls as same acclen, nblock, osamp
@@ -525,11 +525,12 @@ def main(plot_cols=None, band_per_plot=None):
         )
         channels = new_channels if new_channels is not None else channels
 
-    missing_fraction = 1.-avg_vis.count.mean(axis=tuple(range(1,avg_vis.count.ndim)))/avg_vis.counter
+    mean, count, counter = avg_vis.get_mean()
+    missing_fraction = 1.-count.mean(axis=tuple(range(1,count.ndim)))/counter
 
     fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"
     fpath = path.join(outdir,fname)
-    np.savez(fpath, data=avg_vis.mean, missing_fraction=missing_fraction, total_counts=avg_vis.counter, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
+    np.savez(fpath, data=mean, missing_fraction=missing_fraction, total_counts=counter, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
 
     print(f"Saved ALBATROS data with an oversampling rate of {osamp} in {bin_num} plasma frequency bins at")
     print(fpath)
@@ -543,8 +544,9 @@ def main(plot_cols=None, band_per_plot=None):
 
 
 if __name__=="__main__":
-    main(plot_cols=4, band_per_plot=100e3)
+    # main(plot_cols=4, band_per_plot=100e3)
 
-    # data_path = '/scratch/philj0ly/vis_plasma/average_plasma_bins_20_65536_1721343074_1721666031_64_183.npz'
-    # outdir = '/scratch/philj0ly/vis_plasma/plots/'
-    # plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=100e3)
+    data_path = '/scratch/philj0ly/vis_plasma/average_plasma_bins_20_65536_1721343074_1721449881_64_183_v2.npz'
+    outdir = '/scratch/philj0ly/vis_plasma/plots/'
+    bbw = 125e6/2048
+    plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=bbw)

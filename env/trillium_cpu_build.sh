@@ -18,7 +18,7 @@ Description:
 EOF
 }
 
-REQ='/home/philj0ly/env/trillium_cpu_albatros_requirements.txt'
+REQ='/home/philj0ly/env/trillium_jupyter_requirements.txt'
 
 if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     show_help 
