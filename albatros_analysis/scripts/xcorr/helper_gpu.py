@@ -22,19 +22,6 @@ from albatros_analysis.src.utils import pfb_gpu_utils as pu
 from albatros_analysis.src.correlations import baseband_data_classes as bdc
 from albatros_analysis.src.correlations import correlations as cr
 
-# lib = ctypes.CDLL('/home/philj0ly/albatros_analysis/scripts/xcorr/libcgemm_batch.so')
-
-# lib.cgemm_strided_batched.argtypes = [
-#     ctypes.c_void_p,  # A.ptr
-#     ctypes.c_void_p,  # B.ptr
-#     ctypes.c_void_p,  # C.ptr
-#     ctypes.c_int,     # M
-#     ctypes.c_int,     # N
-#     ctypes.c_int,     # K
-#     ctypes.c_int      # batchCount
-# ]
-# lib.cgemm_strided_batched.restype = None
-
 
 @dataclass
 class ProcessingConfig:
@@ -50,7 +37,6 @@ class ProcessingConfig:
     filt_thresh: float = 0.45  # Regularization parameter for IPFB deconvolution
     ntap: int = 4  # Number of taps
     npol: int = 2  # Number of polarizations
-
 
 @dataclass
 class BufferSizes:
@@ -80,6 +66,7 @@ class BufferSizes:
         #     num_of_spectra = (num_of_pfbs-1)*config.nblock+last_pfb_nblock
 
         return cls(lblock, szblock, lchunk, nchan, num_of_pfbs)
+
 
 class MeanTracker:
     """
@@ -251,8 +238,6 @@ class IPFBProcessor:
         
         self.buffers.add_chunk_to_buffer(ant_idx, pol_idx, pu.cupy_ipfb(self.buffers.pol, self.filt)[self.config.cut:-self.config.cut].ravel())
 
-    
-
 class MissingDataTracker:
     """Tracks missing data fractions across processing"""
     
@@ -281,6 +266,7 @@ class MissingDataTracker:
         # Remove entries that won't affect future jobs
         self.missing_count[ant_idx] = [info for info in self.missing_count[ant_idx] if info[1] > 0]
 
+
 def setup_antenna_objects(idxs: List[int], files: List[str], config: ProcessingConfig) -> Tuple[List, np.ndarray]:
     """Set up antenna file iterators"""
     antenna_objs = []
@@ -296,7 +282,6 @@ def setup_antenna_objects(idxs: List[int], files: List[str], config: ProcessingC
     channel_idxs = antenna_objs[0].obj.channel_idxs
     return antenna_objs, channels, channel_idxs
 
-
 def setup_filters_and_windows(config: ProcessingConfig, cupy_win_big: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None) -> Tuple[cp.ndarray, cp.ndarray]:
     """Set up PFB window and IPFB filter"""
     if cupy_win_big is None:
@@ -308,7 +293,6 @@ def setup_filters_and_windows(config: ProcessingConfig, cupy_win_big: Optional[c
         filt = pu.calculate_filter(matft, config.filt_thresh)
     
     return cupy_win_big, filt
-
 
 def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int, nblock: int, 
                    chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45,
