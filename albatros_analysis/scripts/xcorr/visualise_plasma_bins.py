@@ -324,7 +324,7 @@ def plot_from_data(data_path, ncols, outdir, log=False, all_stokes=False, band_p
 
     get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, t_chunk, osamp, ncols, outdir, log=log, all_stokes=all_stokes, band_per_plot=band_per_plot)
 
-def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[RunningMean], dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
+def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker, dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
     """
     Perform oversampling PFB, GPU-based cross-correlation on streaming baseband data, and average over plasma frequency bins.
     
@@ -457,8 +457,7 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: List[Runnin
     
     return t_chunk, freqs, window, filt
 
-
-def main(plot_cols=None, band_per_plot=None):
+def main(plot_cols=None, band_per_plot=None, median=True):
     timer1 = time.time()
 
     config_fn = "visual_config.json"
@@ -512,7 +511,10 @@ def main(plot_cols=None, band_per_plot=None):
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
-    avg_vis = MeanTracker(bin_num)
+    if median:
+        avg_vis = MedianTracker(bin_num)
+    else:
+        avg_vis = MeanTracker(bin_num)
 
     channels = None
     window, filt = None, None # window and filter can be reused between calls as same acclen, nblock, osamp
@@ -528,7 +530,8 @@ def main(plot_cols=None, band_per_plot=None):
     mean, count, counter = avg_vis.get_mean()
     missing_fraction = 1.-count.mean(axis=tuple(range(1,count.ndim)))/counter
 
-    fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"
+    med_name = "median" if median else "mean"
+    fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}_{med_name}.npz"
     fpath = path.join(outdir,fname)
     np.savez(fpath, data=mean, missing_fraction=missing_fraction, total_counts=counter, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
 
@@ -544,9 +547,13 @@ def main(plot_cols=None, band_per_plot=None):
 
 
 if __name__=="__main__":
-    # main(plot_cols=4, band_per_plot=100e3)
-
-    data_path = '/scratch/philj0ly/vis_plasma/average_plasma_bins_20_65536_1721343074_1721449881_64_183_v2.npz'
-    outdir = '/scratch/philj0ly/vis_plasma/plots/'
     bbw = 125e6/2048
-    plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=bbw)
+    # If you want to run the full processing and plotting, just call main()
+    main(plot_cols=4, band_per_plot=bbw, median=True)
+
+
+    # If you just want to plot from existing data, use plot_from_data()
+    # data_path = '/scratch/philj0ly/vis_plasma/average_plasma_bins_20_65536_1721343074_1721449881_64_183_v2.npz'
+    # outdir = '/scratch/philj0ly/vis_plasma/plots/'
+    # bbw = 125e6/2048
+    # plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=bbw)
