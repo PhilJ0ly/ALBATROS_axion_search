@@ -235,7 +235,7 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
 
 def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, 
               t_chunk, osamp, ncols, outdir, 
-              log=False, all_stokes=False, band_per_plot=None, bin_counts=None):
+              log=False, all_stokes=False, band_per_plot=None, bin_counts=None, sharey='none'):
 
     df_record = 125e6 / 2048  # (Hz) frequency range / # of channels
     df = df_record / osamp    # (Hz) / rechannelization factor
@@ -250,7 +250,7 @@ def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans,
         band_limits = [(freqs[0], freqs[-1])]
     else:
         fmin, fmax = freqs[0], freqs[-1]
-        band_edges = np.arange(fmin, fmax + band_per_plot, band_per_plot)
+        band_edges = np.arange(fmin-band_per_plot/2, fmax + band_per_plot, band_per_plot) # <- -bbp/2 to ensure that center of bins (bin numbers) are centered with graph when bbp=61kHz
         band_limits = list(zip(band_edges[:-1], band_edges[1:]))
 
     n_bins = len(avg_data)
@@ -268,7 +268,7 @@ def get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans,
                 continue
 
             fig, axes = plt.subplots(
-                nrows=nrows, ncols=ncols, sharey='row', figsize=(25,height), squeeze=False
+                nrows=nrows, ncols=ncols, sharey=sharey, figsize=(25,height), squeeze=False
             )
             fig.suptitle(
                 f"Stokes Parameter I for Spectrum Band {(f_low+bw)/1e3:.0f}+–{bw/1e3:.0f} kHz\n", fontsize=24
@@ -493,6 +493,9 @@ def main(plot_cols=None, band_per_plot=None, median=True):
 
     plasma_path = config["misc"]["plasma_path"]
     outdir = config["misc"]["out_dir"]
+    tmp_dir = config["misc"]["tmp_dir"]
+    graphs_dir = path.join(outdir, "plots")
+    outdir = path.join(outdir, "out")
 
     obs_period = (1721342774+5*60, 1721449881) # Full observation (first 2 chunks) period (+5min just for buffer times will be shifted back by 2.5min)
 
@@ -508,11 +511,11 @@ def main(plot_cols=None, band_per_plot=None, median=True):
     # obs_period = (1721411900+5*60, 1721666031) # Third 'continuous' chunk of observation period
     
     all_time, all_plasma = get_plasma_data(plasma_path, obs_period)
-    binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(outdir, "plasma_bin_hist.png"), split_for_gaps=True)
+    binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(graphs_dir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
     if median:
-        avg_vis = MedianTracker(bin_num)
+        avg_vis = MedianTrackerDisk(bin_num, tmp_dir, max_size=20)
     else:
         avg_vis = MeanTracker(bin_num)
 
@@ -555,5 +558,5 @@ if __name__=="__main__":
     # If you just want to plot from existing data, use plot_from_data()
     # data_path = '/scratch/philj0ly/vis_plasma/average_plasma_bins_20_65536_1721343074_1721449881_64_183_v2.npz'
     # outdir = '/scratch/philj0ly/vis_plasma/plots/'
-    # bbw = 125e6/2048
+    # outdir = '/home/philj0ly/'
     # plot_from_data(data_path, 4, outdir, log=True, all_stokes=False, band_per_plot=bbw)
