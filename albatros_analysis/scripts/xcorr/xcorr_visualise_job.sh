@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
-#SBATCH --time=05:00:00  
+#SBATCH --time=07:00:00  
 
 
 #SBATCH --job-name=visualise_osamp-65536_bins-20
-#SBATCH --output=/scratch/philj0ly/vis_plasma2/logs/vis_output_%j_osamp-65536_bins-20.out
+#SBATCH --output=/scratch/philj0ly/vis_plasma3/logs/vis_output_%j_osamp-65536_bins-20.out
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 module load StdEnv/2023

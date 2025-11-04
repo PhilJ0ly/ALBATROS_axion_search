@@ -457,7 +457,7 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker
     
     return t_chunk, freqs, window, filt
 
-def main(plot_cols=None, band_per_plot=None, median=True):
+def main(plot_cols=None, band_per_plot=None, median=True, Median_batch_size=200):
     timer1 = time.time()
 
     config_fn = "visual_config.json"
@@ -530,7 +530,7 @@ def main(plot_cols=None, band_per_plot=None, median=True):
         )
         channels = new_channels if new_channels is not None else channels
 
-    mean, count, counter = avg_vis.get_mean()
+    mean, count, counter = avg_vis.get_mean(Median_batch_size)  # max size 200 to avoid memory issues when getting median from disk
     missing_fraction = 1.-count.mean(axis=tuple(range(1,count.ndim)))/counter
 
     med_name = "median" if median else "mean"
@@ -546,13 +546,13 @@ def main(plot_cols=None, band_per_plot=None, median=True):
 
     if plot_cols is not None:
         print("Printing...")
-        get_plots(avg_vis.mean, bin_edges, missing_fraction, avg_vis.counter, channels, t_chunk, osamp, plot_cols, outdir, log=True, all_stokes=False, band_per_plot=band_per_plot)
+        get_plots(avg_vis.mean, bin_edges, missing_fraction, avg_vis.counter, channels, t_chunk, osamp, plot_cols, graphs_dir, log=True, all_stokes=False, band_per_plot=band_per_plot)
 
 
 if __name__=="__main__":
     bbw = 125e6/2048
     # If you want to run the full processing and plotting, just call main()
-    main(plot_cols=4, band_per_plot=bbw, median=True)
+    main(plot_cols=4, band_per_plot=bbw, median=True, median_batch_size=200)
 
 
     # If you just want to plot from existing data, use plot_from_data()

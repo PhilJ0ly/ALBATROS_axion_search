@@ -28,12 +28,7 @@ def main():
 
     config_fn = f"config_axion_gpu.json"
     if len(sys.argv) > 1:
-        config_fn = sys.argv[1]  
-    
-    
-    outdir = "/scratch/philj0ly/test_09_11"
-    if len(sys.argv) > 2:
-        outdir = sys.argv[2]  
+        config_fn = sys.argv[1]   
     
     with open(config_fn, "r") as f:
         config = json.load(f)
@@ -57,9 +52,14 @@ def main():
     chanend = config["frequency"]["end_channel"]
 
     osamp = config["correlation"]["osamp"]
-    ipfb_acclen = config["correlation"]["ipfb_acclen"]
+    ipfb_acclen = config["correlation"]["acclen"]
     nblock = config["correlation"]["nblock"]
     cut = config["correlation"]["cut"]
+
+    if len(sys.argv) > 2:
+        outdir = sys.argv[2]
+    else:
+        outdir = config["misc"]["out_dir"]
     
     
     nchunks = int(np.floor((end_t-init_t)*250e6/4096/ipfb_acclen))

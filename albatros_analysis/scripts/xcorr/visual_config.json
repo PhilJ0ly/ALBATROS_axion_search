@@ -15,8 +15,8 @@
         "bin_num": 20
     },
     "misc": {
-        "out_dir": "/scratch/philj0ly/vis_plasma2",
-        "tmp_dir": "/scratch/philj0ly/vis_plasma2/tmp",
+        "out_dir": "/scratch/philj0ly/vis_plasma3",
+        "tmp_dir": "/scratch/philj0ly/vis_plasma3/tmp",
         "plasma_path": "/project/rrg-sievers/philj0ly/CHAIM/CSV/ACHAIM_nmf2.csv"
     },
     "frequency": {
