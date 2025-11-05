@@ -153,6 +153,10 @@ def bin_plasma_data(all_time: np.ndarray, all_plasma: np.ndarray, bin_num: int, 
     all_time -= int(plasma_t_diff/2) # shift times by half interval to have plasma value at the middle of the interval
 
     counts, bin_edges = np.histogram(all_plasma, bins=bin_num)
+
+    bin_edges[0] -= 1e-6  # ensure min value is included
+    bin_edges[-1] += 1e-6 # ensure max value is included
+
     plasma_idx = np.digitize(all_plasma, bin_edges, right=True) - 1 # -1 to make bins start at 0
 
     time  = []
@@ -457,7 +461,7 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker
     
     return t_chunk, freqs, window, filt
 
-def main(plot_cols=None, band_per_plot=None, median=True, Median_batch_size=200):
+def main(plot_cols=None, band_per_plot=None, median=True, median_batch_size=200):
     timer1 = time.time()
 
     config_fn = "visual_config.json"
