@@ -186,7 +186,7 @@ class MedianTrackerDisk:
             
             self.sum[bin_idx] = []
 
-    def get_mean(self, batch_freq=1000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
+    def get_mean(self, batch_freq: Optional[int] =1000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
         median_array = np.zeros((self.bin_num,) + self.shape, dtype=self.dtype)
 
         for bin_idx in range(self.bin_num):

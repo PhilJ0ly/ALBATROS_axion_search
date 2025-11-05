@@ -534,7 +534,10 @@ def main(plot_cols=None, band_per_plot=None, median=True, median_batch_size=200)
         )
         channels = new_channels if new_channels is not None else channels
 
-    mean, count, counter = avg_vis.get_mean(Median_batch_size)  # max size 200 to avoid memory issues when getting median from disk
+    np.savez(path.join(tmp_dir, "params_checkpoint.npz", counter=avg_vis.counter, bin_num=avg_vis.bin_num, shape=avg_vis.shape, dtype=avg_vis.dtype, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)) # Save in case median fails
+    print("RAW processing complete, getting MEAN/MEDIAN and saving...")
+
+    mean, count, counter = avg_vis.get_mean(median_batch_size)  # max size 200 to avoid memory issues when getting median from disk
     missing_fraction = 1.-count.mean(axis=tuple(range(1,count.ndim)))/counter
 
     med_name = "median" if median else "mean"
