@@ -172,4 +172,77 @@ def repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize=
     print("niter", count, "time", tot/count, "s BW", 2*nant*pol0.nbytes/tot*count/1e6, "MSPS")
     vis = np.ma.masked_invalid(vis)
     return vis, missing_fraction, np.arange(repfb_chanstart, repfb_chanend) 
+
+
+def main():
+    # Processing Unit
+    pUnit = 'gpu' 
+
+    config_fn = "config_axion_gpu.json"
     
+    with open(config_fn, "r") as f:
+        config = json.load(f)
+
+    # Determine reference antenna
+    ref_ant = min(
+        config["antennas"].keys(),
+        key=lambda ant: config["antennas"][ant]["clock_offset"],
+    )
+    dir_parents = []
+    spec_offsets = []
+    # Call get_starting_index for all antennas except reference
+    for i, (ant, details) in enumerate(config["antennas"].items()):
+        print(ref_ant, ant, details)
+        dir_parents.append(details["path"])
+        spec_offsets.append(details["clock_offset"])
+
+    init_t = config["correlation"]["start_timestamp"]
+    end_t = config["correlation"]["end_timestamp"]
+    chanstart = config["frequency"]["start_channel"]
+    chanend = config["frequency"]["end_channel"]
+    osamp = config["correlation"]["osamp"]
+    pfb_mult = config["correlation"]["pfb_size_multiplier"]
+    
+    pfb_size = osamp*pfb_mult
+    outdir = f"/project/s/sievers/philj0ly/xcorr_{pUnit}"
+    
+    # assert pfb_mult >= 8 
+
+    
+    cutsize = 16
+    cut=int(pfb_size/cutsize)
+    # cut = 10
+
+    acclen=pfb_size - 2*cut
+
+    acclen = 2048
+    cut = 100
+
+    nchunks = int(np.floor((end_t-init_t)*250e6/4096/acclen))
+    idxs, files = helper.get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents)
+    print("final idxs", idxs)
+    print("nchunks", nchunks)
+    print("IPFB ROWS", pfb_size)
+    print("OSAMP", osamp)
+
+    print("Processing Unit", pUnit)
+    print("Beginning Processing...\n")
+
+    t1=time.time()
+    pols,missing_fraction,channels=repfb_xcorr_avg(idxs,files,pfb_size,nchunks,chanstart,chanend,osamp,cutsize,filt_thresh=0.45)
+
+      
+    t2=time.time()
+    
+    print("Processing took", t2-t1, "s")
+
+    fname = f"stream_xcorr_all_ant_4bit_{str(init_t)}_{str(acclen)}_{str(osamp)}_{str(nchunks)}_{chanstart}_{chanend}_old.npz"
+    fpath = path.join(outdir,fname)
+    np.savez(fpath,data=pols.data,mask=pols.mask,missing_fraction=missing_fraction,chans=channels)
+
+    print("\nSaved", chanend-chanstart, "channels over", end_t-init_t, "s")
+    print("with an oversampling rate of", osamp, "at")
+    print(fpath)
+
+if __name__=="__main__":
+    main()
