@@ -20,7 +20,7 @@ sys.path.insert(0, path.expanduser("~"))
 from albatros_analysis.src.utils import pfb_gpu_utils as pu
 from albatros_analysis.src.correlations import baseband_data_classes as bdc
 from albatros_analysis.src.correlations import correlations as cr
-from albatros_analysis.scripts.xcorr.median_tracker import MedianTrackerDisk, MeanTracker
+from albatros_analysis.scripts.xcorr.median_tracker import MedianTrackerDisk
 
 
 @dataclass
@@ -67,6 +67,68 @@ class BufferSizes:
 
         return cls(lblock, szblock, lchunk, nchan, num_of_pfbs)
 
+class MockBufferManager:
+    """Mock buffer manager to estimate the number of PFBs needed without allocating large arrays"""
+    def __init__(self, config: ProcessingConfig, sizes: BufferSizes):
+        self.config = config
+        self.sizes = sizes
+
+        # Buffer indices
+        self.rem_idx = np.zeros((config.nant, config.npol), dtype=np.uint64)
+        self.pfb_idx = np.zeros((config.nant, config.npol), dtype=np.uint64)
+
+    def reset_overlap_region(self):
+        """Set up overlap region for continuity between iterations"""
+        self.pfb_idx[:, :] = (self.config.ntap - 1) * self.sizes.lblock
+
+    def _handle_buffer_overflow(self, ant_idx: int, pol_idx: int, available_space: int):
+        """Handles case where remaining buffer exceed available PFB buffer space"""
+        rem_size = self.rem_idx[ant_idx, pol_idx]
+        overflow_size = rem_size - available_space
+        self.rem_idx[ant_idx, pol_idx] = overflow_size
+        self.pfb_idx[ant_idx, pol_idx] = self.sizes.szblock
+    
+    def add_remaining_to_pfb_buffer(self, ant_idx: int, pol_idx: int):
+        """
+        Add remaining buffer data to PFB buffer.
+        Returns True if buffer is full, False if more data needed.
+        """
+        rem_size = self.rem_idx[ant_idx, pol_idx]
+        pfb_pos = self.pfb_idx[ant_idx, pol_idx]
+        
+        if pfb_pos + rem_size > self.sizes.szblock:
+            # handle overflow
+            available_space = self.sizes.szblock - pfb_pos
+            self._handle_buffer_overflow(ant_idx, pol_idx, available_space)
+        else:
+            # add all remaining data
+            self.pfb_idx[ant_idx, pol_idx] += rem_size
+            self.rem_idx[ant_idx, pol_idx] = 0
+
+    def add_chunk_to_buffer(self, ant_idx: int, pol_idx: int):
+        """
+        Add processed chunk to buffers.
+        Returns True if PFB buffer is full.
+        """
+        chunk_size = self.sizes.lchunk
+        pfb_pos = self.pfb_idx[ant_idx, pol_idx]
+        final_pos = pfb_pos + chunk_size
+        
+        if final_pos > self.sizes.szblock:
+            # Handle overflow
+            available_space = self.sizes.szblock - pfb_pos
+            
+            # Store overflow in remaining buffer
+            overflow_size = chunk_size - available_space
+            # Assunmes the remaining buffer is already empty
+            self.rem_idx[ant_idx, pol_idx] = overflow_size
+            self.pfb_idx[ant_idx, pol_idx] = self.sizes.szblock
+        else:
+            # Normal case
+            self.pfb_idx[ant_idx, pol_idx] = final_pos
+    
+    def pad_incomplete_buffer(self, ant_idx: int, pol_idx: int):
+        pass
 
 class BufferManager:
     """Manages GPU buffers for streaming processing"""
@@ -110,7 +172,6 @@ class BufferManager:
             self.pfb_idx[ant_idx, pol_idx] += rem_size
             self.rem_idx[ant_idx, pol_idx] = 0
         
-    
     def _handle_buffer_overflow(self, ant_idx: int, pol_idx: int, available_space: int):
         """Handles case where remaining buffer exceed available PFB buffer space"""
         rem_size = self.rem_idx[ant_idx, pol_idx]
@@ -130,7 +191,8 @@ class BufferManager:
         Add processed chunk to buffers.
         Returns True if PFB buffer is full.
         """
-        chunk_size = len(processed_chunk)
+        chunk_size = len(processed_chunk) # <-- Should be lchunk unless last chunk
+
         pfb_pos = self.pfb_idx[ant_idx, pol_idx]
         final_pos = pfb_pos + chunk_size
         
@@ -150,7 +212,6 @@ class BufferManager:
             self.pfb_buf[ant_idx, pol_idx].flat[pfb_pos:final_pos] = processed_chunk[:]
             self.pfb_idx[ant_idx, pol_idx] = final_pos
 
-    
     def pad_incomplete_buffer(self, ant_idx: int, pol_idx: int):
         """Pad incomplete PFB buffer with zeros"""
 
@@ -274,6 +335,8 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         filt: IPFB filter used
     """
 
+    print("Setting up processing arrays and configurations...")
+
     # Setup configuration
     nant = len(idxs)
     config = ProcessingConfig(
@@ -307,6 +370,8 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         _print_debug_info(config, sizes, buffer_mgr, sizes.num_of_pfbs, nchunks)
     
     job_idx = 0
+
+    print("Beginning Processing...\n")
     
     for i, chunks in enumerate(zip(*antenna_objs)):
         pfbed = False

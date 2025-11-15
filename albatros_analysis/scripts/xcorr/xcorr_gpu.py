@@ -69,7 +69,6 @@ def main():
     print("nchunks", nchunks)
     print("OSAMP", osamp)
 
-    print("Beginning Processing...\n")
 
     # To do: update time measure
     t1=time.time()

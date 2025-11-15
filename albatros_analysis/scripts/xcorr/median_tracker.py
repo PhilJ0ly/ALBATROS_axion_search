@@ -137,18 +137,21 @@ class MedianTrackerDisk:
         self.max_size = max_size
 
         self.counter = np.zeros(bin_num, dtype="int64")
+        self.bin_tot_count = np.zeros(bin_num, dtype="int64")
         self.count = None
         self.sum = None
         
-        for bin_idx in range(bin_num):
-            fn = path.join(self.temp_dir, f"median_tracker_bin{bin_idx}.bin")
-            if path.exists(fn):
-                os.remove(fn)
+        # for bin_idx in range(bin_num):
+        #     fn = path.join(self.temp_dir, f"median_tracker_bin{bin_idx}.bin")
+        #     if path.exists(fn):
+        #         os.remove(fn)
         
         if shape is not None and dtype is not None:
             self.sum = [[] for _ in range(self.bin_num)]
             self.count = np.zeros((bin_num,) + shape, dtype="int64")
-            
+
+    def add_to_bin_tot_count(self, bin_idx: int):
+        self.bin_tot_count[bin_idx] += 1   
 
     def add_to_mean(self, bin_idx, array: np.ndarray):
         assert bin_idx < self.bin_num and bin_idx >= 0, f"Invalid bin index {bin_idx}"

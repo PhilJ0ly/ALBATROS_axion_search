@@ -328,7 +328,7 @@ def plot_from_data(data_path, ncols, outdir, log=False, all_stokes=False, band_p
 
     get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, t_chunk, osamp, ncols, outdir, log=log, all_stokes=all_stokes, band_per_plot=band_per_plot)
 
-def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker, dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
+def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTrackerDisk, dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
     """
     Perform oversampling PFB, GPU-based cross-correlation on streaming baseband data, and average over plasma frequency bins.
     
@@ -404,8 +404,6 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker
     job_idx = 0
 
     for i, chunks in enumerate(zip(*antenna_objs)):
-        pfbed = False
-
         for ant_idx in range(config.nant):
             chunk = chunks[ant_idx]
             for pol_idx in range(config.npol):
@@ -415,7 +413,6 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker
 
         # We know that all antennas/pols have the same PFB index after processing so is sufficient to check one
         while buffer_mgr.pfb_idx[0,0] == sizes.szblock:
-            pfbed = True
             # Generate PFB output for cross-correlation
             for ant_idx in range(config.nant):
                 for pol_idx in range(config.npol):
@@ -449,9 +446,8 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker
             if verbose and job_idx % 100 == 0:
                 print(f"Job Chunk {job_idx + 1}/{sizes.num_of_pfbs} s")
         
-
     # Do not add the last incomplete pfb chunk to avoid tainting any results
-    
+
     if verbose:
         print("=" * 30)
         print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
@@ -461,7 +457,61 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MeanTracker
     
     return t_chunk, freqs, window, filt
 
-def main(plot_cols=None, band_per_plot=None, median=True, median_batch_size=200):
+def mock_repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTrackerDisk, acclen: int,  nblock: int, osamp: int) -> int:
+    """
+    Mock function to simulate counting the number of outputs per plasma bin for median tracker.
+    This function does not perform actual cross-correlation but updates the bin counts in avg_vis.
+    
+    Args:
+        time: List of time intervals (in seconds since epoch)
+        plasma: List of plasma frequency bin indices corresponding to time intervals
+        avg_vis: MedianTrackerDisk object to track counts per plasma bin
+        acclen: Accumulation length in units of 4096-sample IPFB output blocks
+        nblock: Number of PFB blocks per iteration (streamed)
+    """
+
+
+    init_t = time[0]
+    end_t = time[-1]
+    min_t_int = np.min(np.diff(time))
+    nchunks = int(np.floor((end_t-init_t)*250e6/4096/acclen))
+
+    config = ProcessingConfig(
+        acclen=acclen, nchunks=nchunks, nblock=nblock,
+        chanstart=0, chanend=1, osamp=osamp, nant=1, cut=1, filt_thresh=0
+    )
+    sizes = BufferSizes.from_config(config)
+    mock_buffer_mgr = MockBufferManager(config, sizes)
+
+    # Note that the recording frequency is 250 MSPS which means that each sample corresponds to 1/250e6 s
+    time_track = init_t + sizes.lblock * (config.ntap - 1) / 250e6 # this is to adjust for the additional (ntap-1)*lblock
+    time_idx = 0
+    time_max_idx = len(time)-1
+    t_chunk = sizes.lblock * nblock / 250e6 # in seconds <-- already checked that this is correct
+
+    for i in range(nchunks): # <- check that this is correct TO DO
+        # This loop goes over each chunk of data for all antennas to simulate the streaming process and calculate the number of outputs per bin we will have
+        for ant_idx in range(config.nant):
+            for pol_idx in range(config.npol):
+                mock_buffer_mgr.add_chunk_to_buffer(ant_idx, pol_idx)  
+
+        while mock_buffer_mgr.pfb_idx[0,0] == sizes.szblock:
+            time_track += t_chunk
+            while time_idx < time_max_idx and t_chunk/2 < time_track - time[time_idx+1]: 
+                time_idx += 1 # <- will land in the bin where most of the time stream comes from:
+            
+            bin_idx = plasma[time_idx]
+            avg_vis.add_to_bin_tot_count(bin_idx)
+
+            mock_buffer_mgr.reset_overlap_region()
+            for ant_idx in range(config.nant):
+                for pol_idx in range(config.npol):
+                    mock_buffer_mgr.add_remaining_to_pfb_buffer(ant_idx, pol_idx)
+    
+    return t_chunk
+
+
+def main(plot_cols=None, band_per_plot=None, median_batch_size=200):
     timer1 = time.time()
 
     config_fn = "visual_config.json"
@@ -518,10 +568,20 @@ def main(plot_cols=None, band_per_plot=None, median=True, median_batch_size=200)
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(graphs_dir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
-    if median:
-        avg_vis = MedianTrackerDisk(bin_num, tmp_dir, max_size=20)
-    else:
-        avg_vis = MeanTracker(bin_num)
+    avg_vis = MedianTrackerDisk(bin_num, tmp_dir, max_size=20)
+
+    # This will predict how many output rows we will have per plasma bin for median calculation
+    for i in range(len(binned_time)):
+        t_chunk = mock_repfb_xcorr_bin_avg(binned_time[i], binned_plasma[i], avg_vis, acclen, nblock, osamp)
+    # Seems to work fine
+
+    print("Total bins counts:")
+    k = 1
+    for i in range(bin_num):
+        n = avg_vis.bin_tot_count[i]
+        print(f"bin {k}:", n, "intervals,", n*t_chunk/60, "minutes")
+        k+=1
+    sys.exit(0)
 
     channels = None
     window, filt = None, None # window and filter can be reused between calls as same acclen, nblock, osamp
@@ -559,7 +619,7 @@ def main(plot_cols=None, band_per_plot=None, median=True, median_batch_size=200)
 if __name__=="__main__":
     bbw = 125e6/2048
     # If you want to run the full processing and plotting, just call main()
-    main(plot_cols=4, band_per_plot=bbw, median=True, median_batch_size=200)
+    main(plot_cols=4, band_per_plot=bbw,median_batch_size=200)
 
 
     # If you just want to plot from existing data, use plot_from_data()
