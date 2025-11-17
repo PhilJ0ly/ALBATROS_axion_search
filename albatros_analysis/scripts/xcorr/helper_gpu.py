@@ -20,7 +20,7 @@ sys.path.insert(0, path.expanduser("~"))
 from albatros_analysis.src.utils import pfb_gpu_utils as pu
 from albatros_analysis.src.correlations import baseband_data_classes as bdc
 from albatros_analysis.src.correlations import correlations as cr
-from albatros_analysis.scripts.xcorr.median_tracker import MedianTrackerDisk
+from albatros_analysis.scripts.xcorr.median_tracker import MedianTracker
 
 
 @dataclass

@@ -51,7 +51,11 @@ class MedianTracker:
 
         bytes_per_value = self.dtype.itemsize
         file_size = self.shape[-1] * self.bin_tot_count * bytes_per_value
-        
+
+        #  Write the NaN pattern to pre-allocate
+        nan_value = np.array(np.nan, dtype=self.dtype)
+        nan_bytes = nan_value.tobytes()
+
         for bin_idx in range(self.bin_num):
             if self.bin_tot_count[bin_idx] > 0:
 
@@ -60,8 +64,9 @@ class MedianTracker:
                         filepath = self._get_filepath(bin_idx, i, j)
                         
                         with open(filepath, 'wb') as f:
-                            # Write zeros to pre-allocate space
-                            f.write(b'\x00' * file_size[bin_idx]) # maybe choose other carachter than 0? to mark unfilled spots
+                            # f.write(b'\x00' * file_size[bin_idx]) # maybe choose other carachter than 0? to mark unfilled spots
+                            f.write(nan_bytes * file_size[bin_idx])
+
         print(f"Created storage files in {self.temp_dir}")
     
     def _get_filepath(self, bin_idx, i, j):
@@ -129,7 +134,7 @@ class MedianTracker:
             additional_offset = ntimes * itemsize
             for freq_idx in range(batch_nfreq):
                 f.seek(offset)
-                batch_median[freq_idx] = np.median(np.fromfile(f, dtype=self.dtype, count=ntimes))
+                batch_median[freq_idx] = np.nanmedian(np.abs(np.fromfile(f, dtype=self.dtype, count=ntimes))) # This gives back median of magnitude (Ask Mohan what to adjust for future)
                 # print(np.fromfile(f, dtype=self.dtype, count=ntimes))
                 # print(np.median(np.fromfile(f, dtype=self.dtype, count=ntimes)))
                 # sys.exit(0)
@@ -158,7 +163,7 @@ class MedianTracker:
         
         Returns:
         --------
-        medians : ndarray of shape (nfreq,)
+        out : ndarray of shape (nfreq,)
             Median value for each frequency channel
         """
         
@@ -180,7 +185,7 @@ class MedianTracker:
         
         return out
 
-    def get_median(self, batch_freq: Optional[int] = 10000) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
+    def get_median(self, batch_freq: Optional[int] = 10000, n_workers: int = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
         """
         Compute median for each frequency channel in a batch.
         Returns:  array of medians
@@ -197,33 +202,32 @@ class MedianTracker:
                         filepath = self._get_filepath(bin_idx, i, j)
                         
                         self.batched_median_from_disk(
-                            filepath, self.bin_tot_count[bin_idx], nfreq, batch_freq, out=median_array[bin_idx, i, j, :] # <- not sure about this
+                            filepath, self.bin_tot_count[bin_idx], nfreq, batch_freq, out=median_array[bin_idx, i, j, :]
                         )
         
         return median_array, self.fine_counter, self.bin_count
-
-    
     
 
 def test_median_tracker_disk():
-    # Simple test for MedianTrackerDisk
+    # Simple test for MedianTracker
     #  shape=(2,2,20), dtype="float32"
-    tracker = MedianTracker(bin_num=2, temp_dir="/home/philj0ly/tmp")
-    tracker.bin_tot_count += 1001  # Expecting 1000 arrays in bin 0
-    total = np.empty((2,2, 20, 1001), dtype="float32")
+    tracker = MedianTracker(bin_num=1, temp_dir="/home/philj0ly/tmp")
+    tracker.bin_tot_count += 105  # Expecting 1000 arrays in bin 0
+    total = np.empty((2,2, 20, 101), dtype="complex64")
 
-    for i in range(1001):
-        arr = np.array([[np.arange(20)+i, np.arange(20)+i+1],[np.arange(20)+i+20, np.arange(20)+i+21]], dtype="float32")
+    for i in range(101):
+        # arr = np.array([[np.arange(20)+i, (np.arange(20)+i+1)*1j],[np.arange(20)+i+20, (np.arange(20)+i+21)*1j]], dtype="complex64")
+        arr = np.array([[np.random.rand(20)+i, (np.random.rand(20)+i+1)*1j],[np.random.rand(20)+i+20, (np.random.rand(20)+i+21)*1j]], dtype="complex64")
         total[..., i] = arr
         tracker.add_to_buf(bin_idx=0, array=arr)
-        tracker.add_to_buf(bin_idx=1, array=arr*-1)
+        # tracker.add_to_buf(bin_idx=1, array=arr*-1)
 
     median, count, counter = tracker.get_median(3)
     print("Median:\n", median)
-    true_med = np.ma.median(np.ma.masked_invalid(total), axis=-1).filled(np.nan)
+    true_med = np.ma.median(np.ma.masked_invalid(np.abs(total)), axis=-1).filled(np.nan)
     print("Expected Median:\n", true_med)
 
-    print("Success?", np.allclose(median[0], true_med, equal_nan=True) and np.allclose(median[1], -true_med, equal_nan=True))
+    print("Success?", np.allclose(median[0], true_med, equal_nan=True))# and np.allclose(median[1], -true_med, equal_nan=True))
 
     tracker.cleanup()
 

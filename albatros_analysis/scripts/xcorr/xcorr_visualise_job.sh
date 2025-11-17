@@ -5,7 +5,7 @@
 
 
 #SBATCH --job-name=visualise_osamp-65536_bins-20
-#SBATCH --output=/scratch/philj0ly/vis_plasma3/logs/vis_output_%j_osamp-65536_bins-20.out
+#SBATCH --output=/scratch/philj0ly/plasma_vis/logs/vis_output_%j_osamp-65536_bins-20.out
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 module load StdEnv/2023
