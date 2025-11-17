@@ -605,7 +605,7 @@ def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
 
     fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"
     fpath = path.join(outdir,fname)
-    np.savez(fpath, data=mean, missing_fraction=missing_fraction, total_counts=bin_count, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
+    np.savez(fpath, data=median, missing_fraction=missing_fraction, total_counts=bin_count, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)
 
     print(f"Saved ALBATROS data with an oversampling rate of {osamp} in {bin_num} plasma frequency bins at")
     print(fpath)

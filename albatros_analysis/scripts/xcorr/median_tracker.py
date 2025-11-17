@@ -49,8 +49,7 @@ class MedianTracker:
 
         self.cleanup()
 
-        bytes_per_value = self.dtype.itemsize
-        file_size = self.shape[-1] * self.bin_tot_count * bytes_per_value
+        items_per_file = self.shape[-1] * self.bin_tot_count 
 
         #  Write the NaN pattern to pre-allocate
         nan_value = np.array(np.nan, dtype=self.dtype)
@@ -65,7 +64,7 @@ class MedianTracker:
                         
                         with open(filepath, 'wb') as f:
                             # f.write(b'\x00' * file_size[bin_idx]) # maybe choose other carachter than 0? to mark unfilled spots
-                            f.write(nan_bytes * file_size[bin_idx])
+                            f.write(nan_bytes * items_per_file[bin_idx])
 
         print(f"Created storage files in {self.temp_dir}")
     
