@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=1
-#SBATCH --time=07:00:00  
+#SBATCH --time=10:00:00  
 
 
 #SBATCH --job-name=visualise_osamp-65536_bins-20

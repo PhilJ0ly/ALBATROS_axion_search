@@ -374,7 +374,8 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTrack
     time_idx = 0
     time_max_idx = len(time)-1
     t_chunk = sizes.lblock * nblock / 250e6 # in seconds <-- already checked that this is correct
-    
+    avg_vis.t_chunk = t_chunk
+
     # Setup components
     antenna_objs, channels, channel_idxs = setup_antenna_objects(idxs, files, config)
     if len(channels) < chanend - chanstart:
@@ -488,6 +489,7 @@ def mock_repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: Median
     time_idx = 0
     time_max_idx = len(time)-1
     t_chunk = sizes.lblock * nblock / 250e6 # in seconds <-- already checked that this is correct
+    avg_vis.t_chunk = t_chunk
 
     for i in range(nchunks): # <- check that this is correct TO DO
         # This loop goes over each chunk of data for all antennas to simulate the streaming process and calculate the number of outputs per bin we will have
@@ -568,7 +570,7 @@ def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(graphs_dir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
-    avg_vis = MedianTracker(bin_num, tmp_dir)
+    avg_vis = MedianTracker(bin_num, tmp_dir, bin_edges, obs_period[0], obs_period[1])
 
     # This will predict how many output rows we will have per plasma bin for median calculation
     for i in range(len(binned_time)):
@@ -576,8 +578,6 @@ def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
     # Seems to work fine
     
     # maybe add a buffer amount to disk files to avoid issues with exact sizes
-        
-    
 
     # print("Total bins counts:")
     # k = 1
