@@ -7,6 +7,7 @@ from os import path
 from concurrent.futures import ProcessPoolExecutor
 from typing import List, Tuple, Optional
 import struct
+import mmap
 import time
 
 
@@ -38,7 +39,7 @@ class MedianTracker:
         self.header_size = struct.calcsize(self.header_format)
         self.bin_count_offset  = self.header_size - self.bin_count.itemsize
 
-    def read_file_header(self, bin_idx: int, i: int, j: int) -> Tuple[np.ndarray, dict]:
+    def read_file_header(self, bin_idx: int, i: int, j: int) -> dict:
         """Read data and header from a given file."""
         filepath = self._get_filepath(bin_idx, i, j)
         with open(filepath, 'rb') as f:
@@ -137,6 +138,7 @@ class MedianTracker:
         self.bin_tot_count[bin_idx] += 1   
 
     def add_to_buf(self, bin_idx, array: np.ndarray):
+        # print("Adding to bin", bin_idx)
         assert bin_idx < self.bin_num and bin_idx >= 0, f"Invalid bin index {bin_idx}"
 
         if self.shape is None or self.dtype is None:
@@ -149,9 +151,10 @@ class MedianTracker:
             assert array.shape == self.shape, f"Invalid Mean Input. Expected {self.shape} array but got {array.shape}"
             assert array.dtype == self.dtype, f"Invalid Mean Input. Expected array of type {self.dtype} but got {array.dtype}"
 
-
+        t1 = time.time()
         mask = ~np.ma.masked_invalid(array).mask
         self.fine_counter[bin_idx][mask] += 1
+        # print("masked in", time.time()-t1, "s")
 
         if self.bin_count[bin_idx] >= self.bin_tot_count[bin_idx]:
             print(f"Trying to add more arrays to bin {bin_idx} than expected: {self.bin_count[bin_idx]} > {self.bin_tot_count[bin_idx]}")
@@ -166,17 +169,121 @@ class MedianTracker:
                 # In F-major order: freq varies slowest, array_index varies fastest
                 # So data layout is: [arr0_freq0, arr1_freq0, ..., arr0_freq1, arr1_freq1, ...]
                 
+                t1 = time.time()
+                # print("start writing...")
                 with open(filepath, 'r+b') as f:
+                    # Update header count
                     f.seek(self.bin_count_offset)
                     f.write(struct.pack('Q', self.bin_count[bin_idx]+1))  # Update current count
 
                     offset = self.bin_count[bin_idx] * self.dtype.itemsize + self.header_size
                     additional_offset = self.bin_tot_count[bin_idx]*self.dtype.itemsize
+                    # print("adjusted header")
                     for freq_idx in range(self.shape[-1]):
                         # Calculate position in file (F-major ordering)
                         f.seek(offset)
                         f.write(array[i, j, freq_idx].tobytes())
                         offset += additional_offset
+
+                t = time.time()-t1
+                head_bin_count = self.read_file_header(bin_idx, i, j)['bin_count']
+                # print(f"Added array to bin {bin_idx} {i}{j} (count={head_bin_count}) in {t:.2f} s")
+                # raise NotImplementedError("Debugging - remove this line when working")
+        
+        self.bin_count[bin_idx] += 1
+
+    def add_to_bufv2(self, bin_idx, array: np.ndarray):
+        """Optimized version using memory-mapped files for maximum performance"""
+        assert bin_idx < self.bin_num and bin_idx >= 0, f"Invalid bin index {bin_idx}"
+        
+        if self.shape is None or self.dtype is None:
+            self.shape = array.shape
+            self.dtype = np.dtype(array.dtype)
+            self._setup_buf()
+        else:
+            assert array.shape == self.shape, f"Invalid Mean Input. Expected {self.shape} array but got {array.shape}"
+            assert array.dtype == self.dtype, f"Invalid Mean Input. Expected array of type {self.dtype} but got {array.dtype}"
+        
+        # Update mask counter
+        mask = ~np.ma.masked_invalid(array).mask
+        self.fine_counter[bin_idx][mask] += 1
+        
+        if self.bin_count[bin_idx] >= self.bin_tot_count[bin_idx]:
+            print(f"Trying to add more arrays to bin {bin_idx} than expected: {self.bin_count[bin_idx]} > {self.bin_tot_count[bin_idx]}")
+            return
+        
+        # Pre-calculate common values
+        current_count = self.bin_count[bin_idx]
+        itemsize = self.dtype.itemsize
+        freq_stride = self.bin_tot_count[bin_idx] * itemsize
+        base_offset = current_count * itemsize + self.header_size
+        new_bin_count_bytes = struct.pack('Q', current_count + 1)
+        
+        # Process each file using memory mapping
+        for i in range(self.shape[0]):
+            for j in range(self.shape[1]):
+                filepath = self._get_filepath(bin_idx, i, j)
+                pixel_data = array[i, j, :]  # Extract frequency data for this pixel
+                
+                # Memory-map the file for fast random access
+                with open(filepath, 'r+b') as f:
+                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE) as mm:
+                        # Update header count
+                        mm[self.bin_count_offset:self.bin_count_offset + 8] = new_bin_count_bytes
+                        
+                        # Write all frequencies in F-major order
+                        # Layout: [arr0_freq0, arr1_freq0, ..., arr0_freq1, arr1_freq1, ...]
+                        for freq_idx in range(self.shape[-1]):
+                            offset = base_offset + freq_idx * freq_stride
+                            value_bytes = pixel_data[freq_idx].tobytes()
+                            mm[offset:offset + itemsize] = value_bytes
+        
+        self.bin_count[bin_idx] += 1
+
+
+    def add_to_buf_vectorized(self, bin_idx, array: np.ndarray):
+        """Alternative: Vectorized version that writes multiple frequencies at once"""
+        assert bin_idx < self.bin_num and bin_idx >= 0, f"Invalid bin index {bin_idx}"
+        
+        if self.shape is None or self.dtype is None:
+            self.shape = array.shape
+            self.dtype = np.dtype(array.dtype)
+            self._setup_buf()
+        else:
+            assert array.shape == self.shape, f"Invalid Mean Input. Expected {self.shape} array but got {array.shape}"
+            assert array.dtype == self.dtype, f"Invalid Mean Input. Expected array of type {self.dtype} but got {array.dtype}"
+        
+        mask = ~np.ma.masked_invalid(array).mask
+        self.fine_counter[bin_idx][mask] += 1
+        
+        if self.bin_count[bin_idx] >= self.bin_tot_count[bin_idx]:
+            print(f"Trying to add more arrays to bin {bin_idx} than expected")
+            return
+        
+        current_count = self.bin_count[bin_idx]
+        itemsize = self.dtype.itemsize
+        freq_stride = self.bin_tot_count[bin_idx] * itemsize
+        base_offset = current_count * itemsize + self.header_size
+        new_bin_count_bytes = struct.pack('Q', current_count + 1)
+        
+        for i in range(self.shape[0]):
+            for j in range(self.shape[1]):
+                filepath = self._get_filepath(bin_idx, i, j)
+                pixel_data = array[i, j, :]
+                
+                with open(filepath, 'r+b') as f:
+                    with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE) as mm:
+                        # Update header
+                        mm[self.bin_count_offset:self.bin_count_offset + 8] = new_bin_count_bytes
+                        
+                        # Convert all frequency data to contiguous bytes
+                        pixel_bytes = pixel_data.tobytes()
+                        
+                        # Write each frequency value to its correct position
+                        for freq_idx in range(self.shape[-1]):
+                            offset = base_offset + freq_idx * freq_stride
+                            start_byte = freq_idx * itemsize
+                            mm[offset:offset + itemsize] = pixel_bytes[start_byte:start_byte + itemsize]
         
         self.bin_count[bin_idx] += 1
 
@@ -270,6 +377,18 @@ class MedianTracker:
         return median_array, self.fine_counter, self.bin_count
     
 
+def reader():
+    tracker = MedianTracker(bin_num=20, temp_dir="/scratch/philj0ly/plasma_vis/tmp", plasma_bin_edges=np.array(np.arange(21)), t_chunk=1.0, t_init=56, t_final=1721411900)
+
+    for bin_idx in range(20):
+        for i in range(2):
+            for j in range(2):
+                try:
+                    header = tracker.read_file_header(bin_idx, i, j)
+                    print(f"Bin {bin_idx} Pol {i}{j}:", header["bin_count"], "out of", header["bin_tot_count"])
+                except:
+                    print(f"Bin {bin_idx} Pol {i}{j}: File not found")
+
 def test_median_tracker_disk():
     # Simple test for MedianTracker
     #  shape=(2,2,20), dtype="float32"
@@ -281,7 +400,7 @@ def test_median_tracker_disk():
         # arr = np.array([[np.arange(20)+i, (np.arange(20)+i+1)*1j],[np.arange(20)+i+20, (np.arange(20)+i+21)*1j]], dtype="complex64")
         arr = np.array([[np.random.rand(20)+i, (np.random.rand(20)+i+1)*1j],[np.random.rand(20)+i+20, (np.random.rand(20)+i+21)*1j]], dtype="complex64")
         total[..., i] = arr
-        tracker.add_to_buf(bin_idx=0, array=arr)
+        tracker.add_to_buf_vectorized(bin_idx=0, array=arr)
         # tracker.add_to_buf(bin_idx=1, array=arr*-1)
 
     median, count, counter = tracker.get_median(3)
@@ -295,6 +414,32 @@ def test_median_tracker_disk():
 
     tracker.cleanup()
 
+
+def size_speed_test():
+    tracker = MedianTracker(bin_num=1, temp_dir="/scratch/philj0ly/tmp", plasma_bin_edges=np.array([0.2, 1.6]), t_chunk=1.0, t_init=56, t_final=1721411900)
+    tracker.bin_tot_count += 2000
+    nfreq = 1000
+    arr = np.array([[np.random.rand(nfreq), (np.random.rand(nfreq)+1)*1j],[np.random.rand(nfreq)+30, (np.random.rand(nfreq)+31)*1j]], dtype="complex64")
+    tracker.add_to_bufv2(bin_idx=0, array=arr)
+    t1 = time.time()
+
+    for i in range(10):
+        # arr = np.array([[np.arange(20)+i, (np.arange(20)+i+1)*1j],[np.arange(20)+i+20, (np.arange(20)+i+21)*1j]], dtype="complex64")
+        tracker.add_to_buf_vectorized(bin_idx=0, array=arr)
+        if i%10==0:
+            print(i)
+    t = time.time()-t1
+
+    print(f"processed {arr.nbytes} in {t/1000} s")
+    print(arr.nbytes/(t/1000))
+
+
+
+
+
+
 if __name__ == "__main__":   
-    test_median_tracker_disk() 
+    # test_median_tracker_disk() 
+    # reader()
+    size_speed_test()
     
