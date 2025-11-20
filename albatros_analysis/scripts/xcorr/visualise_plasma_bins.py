@@ -328,7 +328,7 @@ def plot_from_data(data_path, ncols, outdir, log=False, all_stokes=False, band_p
 
     get_plots(avg_data, bin_edges, missing_fraction, total_counts, chans, t_chunk, osamp, ncols, outdir, log=log, all_stokes=all_stokes, band_per_plot=band_per_plot)
 
-def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTracker, dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
+def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTrackerC, dir_parents: str, spec_offsets: List[float], acclen: int,  nblock: int, chanstart: int, chanend: int, osamp: int, cut: int = 10, filt_thresh: float = 0.45, window: Optional[cp.ndarray] = None, filt: Optional[cp.ndarray] = None, verbose=False) -> Tuple[int, np.ndarray, cp.ndarray, cp.ndarray]:
     """
     Perform oversampling PFB, GPU-based cross-correlation on streaming baseband data, and average over plasma frequency bins.
     
@@ -458,7 +458,7 @@ def repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTrack
     
     return t_chunk, freqs, window, filt
 
-def mock_repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTracker, acclen: int,  nblock: int, osamp: int) -> int:
+def mock_repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: MedianTrackerC, acclen: int,  nblock: int, osamp: int) -> int:
     """
     Mock function to simulate counting the number of outputs per plasma bin for median tracker.
     This function does not perform actual cross-correlation but updates the bin counts in avg_vis.
@@ -466,7 +466,7 @@ def mock_repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: Median
     Args:
         time: List of time intervals (in seconds since epoch)
         plasma: List of plasma frequency bin indices corresponding to time intervals
-        avg_vis: MedianTracker object to track counts per plasma bin
+        avg_vis: MedianTrackerC object to track counts per plasma bin
         acclen: Accumulation length in units of 4096-sample IPFB output blocks
         nblock: Number of PFB blocks per iteration (streamed)
     """
@@ -570,7 +570,7 @@ def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
     binned_time, binned_plasma, bin_edges = bin_plasma_data(all_time, all_plasma, bin_num, plot_bins_path=path.join(graphs_dir, "plasma_bin_hist.png"), split_for_gaps=True)
     
     # Initialize mean tracker for each bin
-    avg_vis = MedianTracker(bin_num, tmp_dir, bin_edges, obs_period[0], obs_period[1])
+    avg_vis = MedianTrackerC(bin_num, tmp_dir, bin_edges, obs_period[0], obs_period[1])
 
     # This will predict how many output rows we will have per plasma bin for median calculation
     for i in range(len(binned_time)):
