@@ -597,7 +597,17 @@ def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
         )
         channels = new_channels if new_channels is not None else channels
 
-    np.savez(path.join(tmp_dir, "params_checkpoint.npz", bin_count=avg_vis.bin_count, fine_counter=avg_vis.fine_counter, bin_num=avg_vis.bin_num, shape=avg_vis.shape, dtype=avg_vis.dtype, bin_edges=bin_edges, t_chunk=t_chunk, chans=channels, osamp=osamp)) # Save in case median fails
+    np.savez(
+        path.join(tmp_dir, "params_checkpoint.npz"), 
+        bin_count=avg_vis.bin_count, 
+        fine_counter=avg_vis.fine_counter, 
+        bin_num=avg_vis.bin_num, shape=avg_vis.shape, 
+        dtype=avg_vis.dtype, 
+        bin_edges=bin_edges, 
+        t_chunk=t_chunk, 
+        chans=channels, 
+        osamp=osamp
+    ) # Save in case median fails
     print("RAW processing complete, getting MEAN/MEDIAN and saving...")
 
     median, fine_counter, bin_count = avg_vis.get_median(median_batch_size) 
