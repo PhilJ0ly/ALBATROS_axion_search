@@ -513,7 +513,7 @@ def mock_repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: Median
     return t_chunk
 
 
-def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
+def main(plot_cols=None, band_per_plot=None):
     timer1 = time.time()
 
     config_fn = "visual_config.json"
@@ -610,8 +610,8 @@ def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
     ) # Save in case median fails
     print("RAW processing complete, getting MEAN/MEDIAN and saving...")
 
-    median, fine_counter, bin_count = avg_vis.get_median(median_batch_size) 
-    missing_fraction = 1.-fine_counter.mean(axis=tuple(range(1,count.ndim)))/bin_count
+    median, fine_counter, bin_count = avg_vis.get_median() 
+    missing_fraction = 1.-fine_counter.mean(axis=tuple(range(1,fine_counter.ndim)))/bin_count
 
     fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_{obs_period[0]}_{obs_period[1]}_{chanstart}_{chanend}.npz"
     fpath = path.join(outdir,fname)
@@ -627,11 +627,51 @@ def main(plot_cols=None, band_per_plot=None, median_batch_size=10000):
         print("Printing Graph...")
         get_plots(median, bin_edges, missing_fraction, bin_count, channels, t_chunk, osamp, plot_cols, graphs_dir, log=True, all_stokes=False, band_per_plot=band_per_plot)
 
+def just_do_median(tmp_dir: str, outdir: str, plot_cols: int = None, band_per_plot: float = None):
+    # Load parameters from checkpoint
+    with np.load(path.join(tmp_dir, "params_checkpoint.npz"), allow_pickle=True) as f:
+        bin_count = f["bin_count"]
+        fine_counter = f["fine_counter"]
+        bin_num = f["bin_num"].item()
+        shape = tuple(f["shape"])
+        dtype = f["dtype"].item()
+        bin_edges = f["bin_edges"]
+        t_chunk = f["t_chunk"].item()
+        chans = f["chans"]
+        osamp = f["osamp"].item()
+
+    avg_vis = MedianTrackerC(bin_num, tmp_dir, bin_edges, 0, 0) # obs_period not needed here
+    avg_vis.bin_count = bin_count
+    avg_vis.fine_counter = fine_counter
+    avg_vis.shape = shape
+    avg_vis.dtype = dtype
+
+    median, fine_counter, bin_count = avg_vis.get_median() 
+    missing_fraction = 1.-fine_counter.mean(axis=tuple(range(1,fine_counter.ndim)))/bin_count
+
+    fname = f"average_plasma_bins_{str(bin_num)}_{str(osamp)}_from_median_only.npz"
+    fpath = path.join(outdir,fname)
+    np.savez(fpath, data=median, missing_fraction=missing_fraction, total_counts=bin_count, bin_edges=bin_edges, t_chunk=t_chunk, chans=chans, osamp=osamp)
+
+    print(f"Saved ALBATROS data with an oversampling rate of {osamp} in {bin_num} plasma frequency bins at")
+    print(fpath)
+
+    if plot_cols is not None:
+        print("Printing Graph...")
+        get_plots(median, bin_edges, missing_fraction, bin_count, chans, t_chunk, osamp, plot_cols, outdir, log=True, all_stokes=False, band_per_plot=band_per_plot)
+
 
 if __name__=="__main__":
     bbw = 125e6/2048
     # If you want to run the full processing and plotting, just call main()
-    main(plot_cols=4, band_per_plot=bbw,median_batch_size=1000)
+    # main(plot_cols=4, band_per_plot=bbw)
+
+    just_do_median(
+        tmp_dir='/scratch/philj0ly/plasma_vis/tmp/',
+        outdir='/scratch/philj0ly/plasma_vis/out/',
+        plot_cols=4,
+        band_per_plot=bbw
+    )
 
 
     # If you just want to plot from existing data, use plot_from_data()
