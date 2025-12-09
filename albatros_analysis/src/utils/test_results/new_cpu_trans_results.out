@@ -1,0 +1,13 @@
+2800280 X 280 array of Complex64
+
+Summary of timings of 6.273 GB array:
+Tiled transpose (bsc=64, bsr=128): 0.063s - 99.074 GB/s
+Tiled transpose (bsc=128, bsr=16): 0.062s - 101.907 GB/s
+Tiled transpose (bsc=32, bsr=256): 0.062s - 101.925 GB/s
+Tiled transpose (bsc=64, bsr=64): 0.060s - 104.373 GB/s
+Tiled transpose (bsc=64, bsr=256): 0.059s - 106.777 GB/s <--- #3
+Tiled transpose (bsc=64, bsr=32): 0.059s - 106.792 GB/s  <--- #2
+Tiled transpose (bsc=128, bsr=32): 0.058s - 107.408 GB/s <--- #1
+Tiled transpose (bsc=64, bsr=1024): 0.060s - 104.209 GB/s
+Tiled transpose (bsc=128, bsr=512): 0.060s - 105.053 GB/s
+Tiled transpose (bsc=64, bsr=512): 0.059s - 105.726 GB/s

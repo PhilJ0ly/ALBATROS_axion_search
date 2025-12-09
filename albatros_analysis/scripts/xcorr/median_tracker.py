@@ -376,8 +376,6 @@ class MedianTrackerF:
         
         return median_array, self.fine_counter, self.bin_count
     
-
-
 class MedianTrackerC:
     """
     Tracks arrays and calculates medians across huge datasets by storing data on disk.
@@ -547,7 +545,92 @@ class MedianTrackerC:
         
         self.bin_count[bin_idx] += 1
 
-    def get_median(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
+    def get_median(self, batch_freq: Optional[int] = 10000, n_workers: int = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
+        """
+        Compute median for each frequency channel in a batch.
+        Returns:  array of medians
+        """
+        nfreq = self.shape[-1]
+        
+        median_array = np.zeros((self.bin_num,) + self.shape, dtype=self.dtype)
+        print(f"Processing {nfreq//batch_freq+1} batches across {n_workers or os.cpu_count()} cores...")
+
+        for bin_idx in range(self.bin_num):
+            if self.bin_count[bin_idx] > 0:
+                for i in range(self.shape[0]):
+                    for j in range(self.shape[1]):
+                        filepath = self._get_filepath(bin_idx, i, j)
+                        
+                        self.batched_median_from_disk(
+                            filepath, bin_idx, batch_freq, out=median_array[bin_idx, i, j, :]
+                        )
+        
+        return median_array, self.fine_counter, self.bin_count
+
+    @staticmethod
+    def compute_median_batch(args: Tuple[int, int, np.ndarray]) -> Tuple[int, int, np.ndarray]:
+        """Compute median of real and imaginary parts for a batch of rows"""
+
+        batch_start, batch_end, batch = args
+        dtype = batch.dtype
+
+        if np.issubdtype(dtype, np.complexfloating) == False:
+            result = np.median(batch, axis=1).astype(dtype)
+        else:
+            real_medians = np.median(batch.real, axis=1)
+            imag_medians = np.median(batch.imag, axis=1)
+            result = (real_medians+1j*imag_medians).astype(dtype)
+        
+        return batch_start, batch_end, result
+
+
+    def batched_median_from_disk(self, filename: str, bin_idx: int, batch_size: int, n_workers=os.cpu_count(), out=None):
+        """
+        Compute median across time axis for a large (nfreq x ntimes) array
+        stored in frequency-contiguous order on disk.
+        Each batch runs on a separate core.
+        
+        Parameters:
+        -----------
+        filename : str
+            Path to the binary file
+        batch_size : int
+            Number of frequency channels to process per batch
+        n_workers : int, optional
+            Number of parallel workers (cores). Defaults to number of CPUs.
+        
+        Returns:
+        --------
+        out : ndarray of shape (nfreq,)
+            Median value for each frequency channel
+        """
+
+        nfreq = self.shape[-1]
+
+        arr = 0 # Load array from disk (Frequecncy contiguous)
+
+        arrT = 0 # transpose to (ntimes, nfreq) for easier median calculation
+        
+        # Create list of batch arguments
+        batch_args = []
+        for batch_start in range(0, nfreq, batch_size):
+            batch_end = min(batch_start + batch_size, nfreq)
+            batch_args.append((batch_start, batch_end, arrT[batch_start:batch_end]))
+        
+        # Result array
+        if out is None:
+            out = np.empty(nfreq, dtype=self.dtype)
+        
+        
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            results = executor.map(compute_median_batch, batch_args)
+            for batch_start, batch_end, batch_medians in results:
+                out[batch_start:batch_end] = batch_medians
+        
+        return out
+
+
+    def get_median_old(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
         """
         Compute median for each frequency channel using new method.
         Returns:  array of medians
@@ -567,10 +650,9 @@ class MedianTrackerC:
         
         return median_array, self.fine_counter, self.bin_count
 
-    def compute_median(self, bin_idx, i, j):
+    def compute_median_mmap(self, bin_idx, i, j):
         """
-        Ultra-optimized version using numpy's built-in median on memmap.
-        Fastest for large datasets.
+        mediab=n using numpy's built-in median on memmap.
         
         Args:
             bin_idx: Bin index to read from
@@ -592,8 +674,6 @@ class MedianTrackerC:
         n_freqs = self.shape[-1]
         is_complex = np.issubdtype(self.dtype, np.complexfloating)
         
-        
-        
         # Create memory-mapped array directly
         data_matrix = np.memmap(
             filepath, 
@@ -603,8 +683,6 @@ class MedianTrackerC:
             shape=(n_arrays, n_freqs)
         )
         
-        # Transpose and compute median (numpy handles this efficiently)
-        # The transpose is lazy - no data copying
         # Handle complex numbers: compute median of real and imaginary separately
         if is_complex:
             median_real = np.median(data_matrix.real, axis=0)
@@ -620,9 +698,8 @@ class MedianTrackerC:
         return medians.astype(self.dtype)
 
 
-
 def reader_test():
-    tracker = MedianTracker(bin_num=20, temp_dir="/scratch/philj0ly/plasma_vis/tmp", plasma_bin_edges=np.array(np.arange(21)), t_chunk=1.0, t_init=56, t_final=1721411900)
+    tracker = MedianTrackerC(bin_num=20, temp_dir="/scratch/philj0ly/plasma_vis/tmp", plasma_bin_edges=np.array(np.arange(21)), t_chunk=1.0, t_init=56, t_final=1721411900)
 
     for bin_idx in range(20):
         for i in range(2):
@@ -696,6 +773,6 @@ def speed_test():
 
 if __name__ == "__main__":   
     # test_median_tracker_disk() 
-    # reader_test()
-    speed_test()
+    reader_test()
+    # speed_test()
     
