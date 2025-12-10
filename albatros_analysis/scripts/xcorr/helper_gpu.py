@@ -12,6 +12,7 @@ import numpy as np
 import cupy as cp
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
+import time
 
 import sys
 from os import path
