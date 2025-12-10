@@ -51,9 +51,9 @@ def main():
     chanstart = config["frequency"]["start_channel"]
     chanend = config["frequency"]["end_channel"]
 
-    osamp = config["correlation"]["osamp"]
+    osamp_ls = config["correlation"]["osamp"]
     ipfb_acclen = config["correlation"]["acclen"]
-    nblock = config["correlation"]["nblock"]
+    nblock_ls = config["correlation"]["nblock"]
     cut = config["correlation"]["cut"]
 
     if len(sys.argv) > 2:
@@ -67,23 +67,26 @@ def main():
     
     print("final idxs", idxs)
     print("nchunks", nchunks)
-    print("OSAMP", osamp)
 
+    for i in range(len(osamp_ls)):
+        osamp = osamp_ls[i]
+        nblock = nblock_ls[i]
+        print("OSAMP", osamp, "NBLOCK", nblock)
 
-    # To do: update time measure
-    t1=time.time()
-    pols,missing_fraction,channels, _, _ =repfb_xcorr_avg(idxs,files,ipfb_acclen,nchunks,nblock, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
-    t2=time.time()
-    
-    print("Processing took", t2-t1, "s")
+        # To do: update time measure
+        t1=time.time()
+        pols,missing_fraction,channels, _, _ =repfb_xcorr_avg(idxs,files,ipfb_acclen,nchunks,nblock, chanstart,chanend,osamp,cut=cut,filt_thresh=0.45)
+        t2=time.time()
+        
+        print("Total Processing took", t2-t1, "s")
 
-    fname = f"all_ant_4bit_{str(init_t)}_{str(ipfb_acclen)}_{str(osamp)}_{str(nblock)}_{chanstart}_{chanend}.npz"
-    fpath = path.join(outdir,fname)
-    np.savez(fpath,data=pols.data,mask=pols.mask,missing_fraction=missing_fraction,chans=channels)
+        fname = f"all_ant_4bit_{str(init_t)}_{str(ipfb_acclen)}_{str(osamp)}_{str(nblock)}_{chanstart}_{chanend}.npz"
+        fpath = path.join(outdir,fname)
+        np.savez(fpath,data=pols.data,mask=pols.mask,missing_fraction=missing_fraction,chans=channels)
 
-    print("\nSaved", chanend-chanstart, "channels over", end_t-init_t, "s")
-    print("with an oversampling rate of", osamp, "at")
-    print(fpath)
+        print("\nSaved", chanend-chanstart, "channels over", end_t-init_t, "s")
+        print("with an oversampling rate of", osamp, "at")
+        print(fpath)
 
 
 if __name__=="__main__":

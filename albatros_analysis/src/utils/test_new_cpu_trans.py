@@ -38,7 +38,7 @@ def test_trans():
     assert(np.allclose(xT, xT_ref))
     print("tiled_transpose test passed.")
 
-def test_speed(nr,nc, niter=100, niter2=1000):
+def test_speed(nr,nc, niter=1, niter2=10):
     # x_re =np.random.randn(nr*nc).reshape(nr,nc)
     # x_im =np.random.randn(nr*nc).reshape(nr,nc)
     x_re = np.ones((nr,nc), dtype=np.float32)
@@ -106,6 +106,7 @@ def test_speed(nr,nc, niter=100, niter2=1000):
         shp = new_list[i][0]
         new_list[i] = (shp, time_per_it, x.nbytes/(time_per_it*1e9))
 
+    new_list = sorted(new_list, key=lambda item: item[1])
     print(f"\nSummary of timings of {x.nbytes/1e9:.3f} GB array:")
     for bs, t, band in new_list[:10]:
         if bs == "numpy":
@@ -120,5 +121,5 @@ if __name__ == "__main__":
     nr = 120* 2**16
     # for 1000 columns -> we get ~7864 Rows per Column
 
-    scale = 280
-    test_speed(10001*scale, scale, niter=10)
+    scale = 1000
+    test_speed(7864*scale, scale, niter=10)

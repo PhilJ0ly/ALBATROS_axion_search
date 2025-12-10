@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 import json
-import cupy as cp
 from typing import List, Tuple, Optional
 import time
 
@@ -17,8 +16,10 @@ from os import path
 import sys
 sys.path.insert(0,path.expanduser("~"))
 
+import cupy as cp
 from albatros_analysis.scripts.xcorr.helper import get_init_info_all_ant
 from albatros_analysis.scripts.xcorr.helper_gpu import *
+
 
 
 def get_plasma_freq(nmf2: np.ndarray) -> np.ndarray:
@@ -514,6 +515,7 @@ def mock_repfb_xcorr_bin_avg(time: List[int], plasma: List[int], avg_vis: Median
 
 
 def main(plot_cols=None, band_per_plot=None):
+
     timer1 = time.time()
 
     config_fn = "visual_config.json"
@@ -630,9 +632,9 @@ def main(plot_cols=None, band_per_plot=None):
 def just_do_median(tmp_dir: str, outdir: str, plot_cols: int = None, band_per_plot: float = None):
     # Load parameters from checkpoint
     with np.load(path.join(tmp_dir, "params_checkpoint.npz"), allow_pickle=True) as f:
-        bin_count = f["bin_count"]
-        fine_counter = f["fine_counter"]
-        bin_num = f["bin_num"].item()
+        bin_count = f["bin_count"].astype("int64")
+        fine_counter = f["fine_counter"].astype("int64")
+        bin_num = int(f["bin_num"].item())
         shape = tuple(f["shape"])
         dtype = f["dtype"].item()
         bin_edges = f["bin_edges"]

@@ -9,14 +9,14 @@
     },
     "correlation": {
         "start_timestamp": 1721361671,
-        "end_timestamp": 1721361971,
-        "osamp": 65536, 
+        "end_timestamp": 1721365271,
+        "osamp": [65536],
         "acclen": 2048, 
-        "nblock": 5,
+        "nblock": [5],
         "cut": 10
     },
     "misc": {
-        "out_dir": "/scratch/philj0ly/vis_plasma2"
+        "out_dir": "/scratch/philj0ly/speed_repfb"
     },
     "frequency": {
         "start_channel":0, 

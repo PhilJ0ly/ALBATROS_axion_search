@@ -4,18 +4,19 @@
 #SBATCH --time=01:00:00  
 
 
-#SBATCH --job-name=xcorr_osamp(64)_pfb(256)
-#SBATCH --output=/project/s/sievers/philj0ly/xcorr_gpu/logs/xcorr_output_%j_osamp(64)_pfb(256).txt
+#SBATCH --job-name=xcorr_repfb
+#SBATCH --output=/scratch/philj0ly/speed_repfb/logs/xcorr_output_%j_repfb.out
 #SBATCH --mail-type=BEGIN,END,FAIL
 
-module load MistEnv/2021a anaconda3/2021.05
-source activate albatros
-module load cuda/11.7.1
-module load gcc/11.4.0
+module load StdEnv/2023
+module load python/3.11.5 gcc/12.3
+module load cuda/12.6 fftw/3.3.10
+
+source cd /home/philj0ly/albatros_analysis
+source bin/activate
 
 export USE_GPU=1
-export LD_LIBRARY_PATH=/home/s/sievers/philj0ly/.conda/envs/albatros/lib/:$LD_LIBRARY_PATH
-export CUPY_CACHE_DIR=/project/s/sievers/philj0ly/.cupy/kernel_cache
+export CUPY_CACHE_DIR=/scratch/philj0ly/.cupy/kernel_cache
 
-cd /home/s/sievers/philj0ly/albatros_analysis/scripts/xcorr
-python xcorr_gpu_cpu.py gpu config_axion.json
+source cd /home/philj0ly/albatros_analysis/scripts/xcorr
+python xcorr_gpu.py

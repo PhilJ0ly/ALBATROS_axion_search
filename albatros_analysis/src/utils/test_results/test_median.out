@@ -1,0 +1,7 @@
+192 CPU cores detected
+Computed batched (500) median of array shape (400, 4000000) in 7.76 s - 1.6501367791310102 GB/s
+Computed batched (1000) median of array shape (400, 4000000) in 5.11 s - 2.5046757584775787 GB/s
+Computed batched (2000) median of array shape (400, 4000000) in 6.17 s - 2.0752690980134396 GB/s
+Computed batched (3000) median of array shape (400, 4000000) in 6.35 s - 2.0157012146187068 GB/s
+Computed np median of array shape (400, 4000000) in 47.14 s - 0.2715101276413029 GB/s
+Computed numba median of array shape (400, 4000000) in 2.05 s - 6.2311826947350095 GB/s

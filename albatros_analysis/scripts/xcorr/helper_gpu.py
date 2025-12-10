@@ -338,6 +338,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     print("Setting up processing arrays and configurations...")
 
     # Setup configuration
+    t_setUp = time.time()
     nant = len(idxs)
     config = ProcessingConfig(
         acclen=acclen, nchunks=nchunks, nblock=nblock,
@@ -369,9 +370,11 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
     if verbose:
         _print_debug_info(config, sizes, buffer_mgr, sizes.num_of_pfbs, nchunks)
     
+    print(f"Setup took {time.time() - t_setUp} s")
     job_idx = 0
 
     print("Beginning Processing...\n")
+    t_repfb = time.time()
     
     for i, chunks in enumerate(zip(*antenna_objs)):
         pfbed = False
@@ -449,6 +452,7 @@ def repfb_xcorr_avg(idxs: List[int], files: List[str], acclen: int, nchunks: int
         print("Paded and Processed Incomplete Buffer")
     
     # if verbose:
+    print(f"RePFB Processing took {time.time() - t_repfb} s")
     print("=" * 30)
     print(f"Completed {sizes.num_of_pfbs}/{sizes.num_of_pfbs} Job Chunks")
     print("=" * 30)

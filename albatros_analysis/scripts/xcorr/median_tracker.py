@@ -8,7 +8,11 @@ from concurrent.futures import ProcessPoolExecutor
 from typing import List, Tuple, Optional
 import struct
 import mmap
+from numba import njit, prange
 import time
+
+sys.path.insert(0,path.expanduser("~"))
+from albatros_analysis.src.utils.pfb_utils import tiled_transpose
 
 
 class MedianTrackerF:
@@ -375,7 +379,84 @@ class MedianTrackerF:
                         )
         
         return median_array, self.fine_counter, self.bin_count
+
+@njit(parallel=True, fastmath=True)
+def numba_median(arr, is_complex, out=None):
+    """
+    Computes the median using Numba for acceleration/parallelization.
+    Median calculated separately for real and imaginary parts.
+    Median calculated along axis 1 (time).
+    Median calculation is done manually for better performance.
+    Designed for nfreqs >> ntimes
     
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array of shape (nfreqs, ntimes) time-contiguous.
+    is_complex : bool
+        Whether the input array is complex-valued.
+    out : np.ndarray, optional
+        Pre-allocated output array of shape (nfreqs,). If None, a new array is created.
+        
+    Returns
+    -------
+    medians : np.ndarray
+        Array of shape (nfreqs,)
+    """
+
+    n_freqs, n_times = arr.shape
+    dtype = arr.dtype
+    # out_type_constructor = dtype.type
+
+    
+    if out is None:
+        out = np.empty(n_freqs, dtype=dtype)
+    else:
+        assert out.shape == (n_freqs,) and out.dtype == dtype, f"Output array has incorrect shape {out.shape} or dtype {out.dtype}, expected {(n_freqs,)} {dtype}"
+    
+    mid_idx = n_times // 2
+    is_even = (n_times % 2 == 0)
+    
+    if is_complex:
+        for i in prange(n_freqs):
+            # Extract row (this is a view)
+            row = arr[i, :]
+            
+            # Copy to a temporary array so we can sort without modifying input
+            # n_times is small, this allocation is cheap
+            r_temp = row.real.copy()
+
+            # O(nlogn) sort cheap for small n_times
+            r_temp.sort()
+            
+            if is_even:
+                r_med = (r_temp[mid_idx - 1] + r_temp[mid_idx]) * 0.5
+            else:
+                r_med = r_temp[mid_idx]
+
+            i_temp = row.imag.copy()
+            i_temp.sort()
+            
+            if is_even:
+                i_med = (i_temp[mid_idx - 1] + i_temp[mid_idx]) * 0.5
+            else:
+                i_med = i_temp[mid_idx]
+                
+            # Combine into output
+            out[i] = r_med + 1j * i_med
+    else:
+        for i in prange(n_freqs):
+            row = arr[i, :]
+            r_temp = row.copy()
+            r_temp.sort()
+            
+            if is_even:
+                out[i] =(r_temp[mid_idx - 1] + r_temp[mid_idx]) * 0.5
+            else:
+                out[i] = r_temp[mid_idx]
+    
+    return out.astype(dtype)
+
 class MedianTrackerC:
     """
     Tracks arrays and calculates medians across huge datasets by storing data on disk.
@@ -545,6 +626,22 @@ class MedianTrackerC:
         
         self.bin_count[bin_idx] += 1
 
+    # @staticmethod
+    # def compute_median_batch(args: Tuple[int, int, np.ndarray]) -> Tuple[int, int, np.ndarray]:
+        # """Compute median of real and imaginary parts for a batch of rows"""
+
+        # batch_start, batch_end, batch = args
+        # dtype = batch.dtype
+
+        # if np.issubdtype(dtype, np.complexfloating) == False:
+        #     result = np.median(batch, axis=1).astype(dtype)
+        # else:
+        #     real_medians = np.median(batch.real, axis=1)
+        #     imag_medians = np.median(batch.imag, axis=1)
+        #     result = (real_medians+1j*imag_medians).astype(dtype)
+        
+        # return batch_start, batch_end, result
+
     def get_median(self, batch_freq: Optional[int] = 10000, n_workers: int = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
         """
         Compute median for each frequency channel in a batch.
@@ -553,7 +650,7 @@ class MedianTrackerC:
         nfreq = self.shape[-1]
         
         median_array = np.zeros((self.bin_num,) + self.shape, dtype=self.dtype)
-        print(f"Processing {nfreq//batch_freq+1} batches across {n_workers or os.cpu_count()} cores...")
+        # print(f"Processing {nfreq//batch_freq+1} batches across {n_workers or os.cpu_count()} cores...")
 
         for bin_idx in range(self.bin_num):
             if self.bin_count[bin_idx] > 0:
@@ -564,25 +661,9 @@ class MedianTrackerC:
                         self.batched_median_from_disk(
                             filepath, bin_idx, batch_freq, out=median_array[bin_idx, i, j, :]
                         )
+                        # print(50*"-")
         
         return median_array, self.fine_counter, self.bin_count
-
-    @staticmethod
-    def compute_median_batch(args: Tuple[int, int, np.ndarray]) -> Tuple[int, int, np.ndarray]:
-        """Compute median of real and imaginary parts for a batch of rows"""
-
-        batch_start, batch_end, batch = args
-        dtype = batch.dtype
-
-        if np.issubdtype(dtype, np.complexfloating) == False:
-            result = np.median(batch, axis=1).astype(dtype)
-        else:
-            real_medians = np.median(batch.real, axis=1)
-            imag_medians = np.median(batch.imag, axis=1)
-            result = (real_medians+1j*imag_medians).astype(dtype)
-        
-        return batch_start, batch_end, result
-
 
     def batched_median_from_disk(self, filename: str, bin_idx: int, batch_size: int, n_workers=os.cpu_count(), out=None):
         """
@@ -605,97 +686,56 @@ class MedianTrackerC:
             Median value for each frequency channel
         """
 
+        # print(f"Loading data from {filename} for median computation...")
         nfreq = self.shape[-1]
 
-        arr = 0 # Load array from disk (Frequecncy contiguous)
+        # Read entire array from disk
+        arr_time = time.time()
+        arr = np.fromfile(
+            filename, 
+            dtype=self.dtype, 
+            offset=self.header_size, 
+            count=self.bin_count[bin_idx]*nfreq
+        ).reshape((self.bin_count[bin_idx], nfreq))  # shape (ntimes, nfreq) C/frequency - conitguous order
+        print(f"Loaded array of shape {arr.shape} from disk in {time.time()-arr_time:.2f} s")
 
-        arrT = 0 # transpose to (ntimes, nfreq) for easier median calculation
+        # Transposing
+        # print(f"Transposing {(nfreq, self.bin_count[bin_idx])}  array for batch median computation...")
+        t_trans = time.time()
+        arrT = tiled_transpose(arr)  # shape (nfreq, ntimes) Time-contiguous order
+        t_trans = time.time() - t_trans
+        print(f"Completed transpose {(nfreq, self.bin_count[bin_idx])} in {t_trans}s - {arr.nbytes/t_trans/1e9} GB/s")
         
         # Create list of batch arguments
-        batch_args = []
-        for batch_start in range(0, nfreq, batch_size):
-            batch_end = min(batch_start + batch_size, nfreq)
-            batch_args.append((batch_start, batch_end, arrT[batch_start:batch_end]))
+
+        # batch_args = []
+        # t_batch = time.time()
+        # for batch_start in range(0, nfreq, batch_size):
+        #     batch_end = min(batch_start + batch_size, nfreq)
+        #     batch_args.append((batch_start, batch_end, arrT[batch_start:batch_end]))
+        # t_batch = time.time() - t_batch
+        # print(f"Prepared {len(batch_args)} batches in {t_batch:.3f} s")
         
-        # Result array
-        if out is None:
-            out = np.empty(nfreq, dtype=self.dtype)
+        # # Result array
+        # if out is None:
+        #     out = np.empty(nfreq, dtype=self.dtype)
         
-        
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
-            results = executor.map(compute_median_batch, batch_args)
-            for batch_start, batch_end, batch_medians in results:
-                out[batch_start:batch_end] = batch_medians
+        # # print(f"Computing median in batches of {batch_size} across {n_workers} workers...")
+        # t_med = time.time()
+        # with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        #     results = executor.map(self.compute_median_batch, batch_args)
+        #     for batch_start, batch_end, batch_medians in results:
+        #         out[batch_start:batch_end] = batch_medians
+        # t_med = time.time() - t_med
+
+        is_complex = np.issubdtype(self.dtype, np.complexfloating)
+
+        t_med = time.time()
+        out = numba_median(arrT, is_complex, out=out)
+        t_med = time.time() - t_med
+        print(f"Computed median across {nfreq} frequencies in {t_med:.2f} s - {arrT.nbytes/t_med/1e9} GB/s")
         
         return out
-
-
-    def get_median_old(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]: 
-        """
-        Compute median for each frequency channel using new method.
-        Returns:  array of medians
-        """
-        nfreq = self.shape[-1]
-        
-        median_array = np.zeros((self.bin_num,) + self.shape, dtype=self.dtype)
-
-        for bin_idx in range(self.bin_num):
-            if self.bin_count[bin_idx] > 0:
-                for i in range(self.shape[0]):
-                    for j in range(self.shape[1]):
-                        median_array[bin_idx, i, j, :] = self.compute_median(
-                            bin_idx, i, j
-                        )
-                    
-        
-        return median_array, self.fine_counter, self.bin_count
-
-    def compute_median_mmap(self, bin_idx, i, j):
-        """
-        mediab=n using numpy's built-in median on memmap.
-        
-        Args:
-            bin_idx: Bin index to read from
-            i, j: Pixel coordinates
-        
-        Returns:
-            np.ndarray: Median values across time for each frequency
-        """
-        filepath = self._get_filepath(bin_idx, i, j)
-        
-        # Read header
-        with open(filepath, 'rb') as f:
-            f.seek(self.bin_count_offset)
-            n_arrays = struct.unpack('Q', f.read(8))[0]
-        
-        if n_arrays == 0:
-            return None
-        
-        n_freqs = self.shape[-1]
-        is_complex = np.issubdtype(self.dtype, np.complexfloating)
-        
-        # Create memory-mapped array directly
-        data_matrix = np.memmap(
-            filepath, 
-            dtype=self.dtype, 
-            mode='r', 
-            offset=self.header_size,
-            shape=(n_arrays, n_freqs)
-        )
-        
-        # Handle complex numbers: compute median of real and imaginary separately
-        if is_complex:
-            median_real = np.median(data_matrix.real, axis=0)
-            median_imag = np.median(data_matrix.imag, axis=0)
-            medians = (median_real + 1j * median_imag).astype(self.dtype)
-        else:
-            # Real numbers: standard median
-            medians = np.median(data_matrix, axis=0).astype(self.dtype)
-        
-        # Clean up memmap
-        del data_matrix
-        
-        return medians.astype(self.dtype)
 
 
 def reader_test():
@@ -714,7 +754,7 @@ def test_median_tracker_disk():
     # Simple test for MedianTracker
     #  shape=(2,2,20), dtype="float32"
     dtype = np.dtype("complex64")
-    tracker = MedianTrackerC(bin_num=1, temp_dir="/home/philj0ly/tmp", plasma_bin_edges=np.array([0.2, 1.6]), t_chunk=1.0, t_init=56, t_final=1721411900)
+    tracker = MedianTrackerC(bin_num=1, temp_dir="/scratch/philj0ly/tmp_test", plasma_bin_edges=np.array([0.2, 1.6]), t_chunk=1.0, t_init=56, t_final=1721411900)
     tracker.bin_tot_count += 105  # Expecting 1000 arrays in bin 0
     total = np.empty((2,2, 20, 101), dtype=dtype)
 
@@ -741,25 +781,28 @@ def test_median_tracker_disk():
 
 def speed_test():
     tracker = MedianTrackerC(bin_num=1, temp_dir="/scratch/philj0ly/tmp", plasma_bin_edges=np.array([0.2, 1.6]), t_chunk=1.0, t_init=56, t_final=1721411900)
-    N = 1000
-    tracker.bin_tot_count += N+1
-    nfreq = 10000
+    ntimes = 500
+    N = 10
+    tracker.bin_tot_count += ntimes+1
+    nfreq = 10_000*ntimes
     dtype = "complex64"
+    tracker.shape = (2,2,nfreq)
+    tracker.dtype = np.dtype(dtype)
     
-    arr = np.array([[np.random.rand(nfreq), (np.random.rand(nfreq)+1)*1j],[np.random.rand(nfreq)+30, (np.random.rand(nfreq)+31)*1j]], dtype=dtype)
-    # Warm-Up
-    tracker.add_to_buf(bin_idx=0, array=arr)
+    # arr = np.array([[np.ones(nfreq), (np.ones(nfreq)+1)*1j],[np.ones(nfreq)+30, (np.ones(nfreq)+31)*1j]], dtype=dtype)
+    # # Warm-Up
+    # tracker.add_to_buf(bin_idx=0, array=arr)
 
-    t1 = time.time()
-    for i in range(N):
-        tracker.add_to_buf(bin_idx=0, array=arr)
-        if i%max(1,N//10)==0:
-            print(i)
-    t_add = time.time()-t1
+    # t1 = time.time()
+    # for i in range(ntimes):
+    #     tracker.add_to_buf(bin_idx=0, array=arr)
+    #     if i%max(1,ntimes//10)==0:
+    #         print(i)
+    # t_add = time.time()-t1
 
-    print(f"{N} arrays of {arr.nbytes} Bytes ({nfreq} n_freq of {dtype}) added in {t_add} s ({(t_add/N)} s each)")
-    print(f"Processing Speed {arr.nbytes/(t_add/N)} Bytes/s")
-    print(30*"-")
+    # print(f"{ntimes} arrays of {arr.nbytes/1e9} GB ({nfreq} n_freq of {dtype}) added in {t_add} s ({(t_add/ntimes)} s each)")
+    # print(f"Processing Speed {arr.nbytes/1e9/(t_add/ntimes)} GB/s")
+    # print(30*"-")
 
     t1 = time.time()
     for i in range(N):
@@ -767,12 +810,14 @@ def speed_test():
         if i%max(1,N//10)==0:
             print(i)
     t_median = time.time()-t1
-    print(f"{N} medians of {N+1} arrays of {arr.nbytes} Bytes ({nfreq} n_freq of {dtype}) computed in {t_median} s ({(t_median/N)} s each)")
-    print(f"Processing Speed {(N+1)*arr.nbytes/(t_median/N)} Bytes/s")
+    print(f"{N} medians of {ntimes+1} arrays of {arr.nbytes/1e9} GB ({nfreq} n_freq of {dtype}) computed in {t_median} s ({(t_median/N)} s each)")
+    print(f"Processing Speed {(ntimes+1)*arr.nbytes/1e9/(t_median/N)} GB/s")
+
+    # we seem to be getting speeds of 0.15 GB/s which puts us at around 10 minutes for vis pipeline
 
 
 if __name__ == "__main__":   
     # test_median_tracker_disk() 
-    reader_test()
-    # speed_test()
+    # reader_test()
+    speed_test()
     
