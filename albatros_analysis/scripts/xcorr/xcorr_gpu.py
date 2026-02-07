@@ -26,7 +26,7 @@ from helper_gpu import repfb_xcorr_avg
 def main():
     # Could add a check that GPU is there
 
-    config_fn = f"config_axion_gpu.json"
+    config_fn = f"config_test.json"
     if len(sys.argv) > 1:
         config_fn = sys.argv[1]   
     
@@ -63,6 +63,9 @@ def main():
     
     
     nchunks = int(np.floor((end_t-init_t)*250e6/4096/ipfb_acclen))
+
+    print(init_t, end_t, spec_offsets, dir_parents)
+    print((end_t-init_t)/60, 'min')
     idxs, files = helper.get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents)
     
     print("final idxs", idxs)

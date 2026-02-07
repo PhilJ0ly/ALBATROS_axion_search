@@ -1,0 +1,25 @@
+{
+    "antennas": {
+        "ALB1": {
+            "name": "Antenna 1",
+            "path": "/scratch/thomasb/phillipe/",
+            "coordinates": [51.4646065, -68.2352594, 341.052],
+            "clock_offset": 0
+        }
+    },
+    "correlation": {
+        "start_timestamp": 1445541650,
+        "end_timestamp": 1445541900,
+        "osamp": [65536],
+        "acclen": 2048, 
+        "nblock": [5],
+        "cut": 10
+    },
+    "misc": {
+        "out_dir": "/scratch/philj0ly/clock_tests"
+    },
+    "frequency": {
+        "start_channel":0, 
+        "end_channel": 120
+    }
+}

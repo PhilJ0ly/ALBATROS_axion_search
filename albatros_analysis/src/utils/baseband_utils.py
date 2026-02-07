@@ -7,6 +7,8 @@ import datetime
 import glob
 import re
 
+file_search_mine_depth = "1"# <-- Here I changed the mine depth to 1, just for the test directory layout. Should be changed back to 2 for the real data layout.
+
 def _find(dir_parent, search_type, search_tag, min_depth):
     return subprocess.run(
         [
@@ -51,6 +53,7 @@ def get_file_from_timestamp(ts, dir_parent, search_type, force_ts=False, acclen=
         If there is no matching file, the user is required to start their integration
         from the next available timestamp that's helpfully suggested.
     """
+    # print(f"Looking for a file in {dir_parent} containing timestamp {ts}")
     assert(search_type in ["f", "d"])
     # if isinstance(ts, int) or isinstance(ts, float):
     if not isinstance(ts, str):
@@ -61,8 +64,10 @@ def get_file_from_timestamp(ts, dir_parent, search_type, force_ts=False, acclen=
         search_tags = [tag + "\.raw" for tag in search_tags]
     search_tag = "|".join(search_tags)
     ts = float(ts)
-    op = _find(dir_parent, search_type, search_tag, "2")
+    op = _find(dir_parent, search_type, search_tag, file_search_mine_depth) 
     files = op.split()
+    # print(f"Found {len(files)} files in total")
+    
     files.sort()  # files need to be in the same order as the timestamps, so we can simply pick the correct file later
     # print("FROM UTILS_______:",files)
     tstamps = np.asarray(
@@ -157,13 +162,14 @@ def time2fnames(time_start, time_stop, dir_parent, search_type, fraglen=5,mind_g
     if search_type == "f":
         search_tags = [tag + "\.raw" for tag in search_tags]
     search_tag = "|".join(search_tags)
-    op = _find(dir_parent, search_type, search_tag, "2")
+    op = _find(dir_parent, search_type, search_tag, file_search_mine_depth) 
     files = op.split() #get all files for all 5-digit tstamps spanning the range.
     files.sort()
     tstamps = np.asarray(
         [int(s.split("/")[-1].split(".")[0]) for s in files]
     )
     idx = np.where(np.bitwise_and(tstamps>=int(time_start),tstamps<=int(time_stop)))[0]
+    # print(f"Found {len(files)} files in total, {len(idx)} of which are between {time_start} and {time_stop}")
     if mind_gap:
         tdiff = np.diff(tstamps[idx])
         if search_type == "d":

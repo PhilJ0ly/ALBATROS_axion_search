@@ -581,6 +581,7 @@ class BasebandFileIterator:
         self.chunksread = 0
         self.type = type
         self.file_loader = self.get_file_loader() #NB: this is technically not a bound method, but it's OK b/c we don't need self to be passed to file_loader.
+        
         self.obj = self.file_loader(
             file_paths[fileidx], channels=channels, chanstart=chanstart, chanend=chanend, unpack=False
         )

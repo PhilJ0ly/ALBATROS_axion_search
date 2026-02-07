@@ -90,6 +90,7 @@ def get_init_info_all_ant(init_t, end_t, spec_offsets, dir_parents):
         f_start, idx = butils.get_file_from_timestamp(init_t, dir_parent, "f")
         idxs[anum] = idx
         f_end, _ = butils.get_file_from_timestamp(end_t, dir_parent, "f")
+
         files.append(
             butils.time2fnames(
                 butils.get_tstamp_from_filename(f_start),
